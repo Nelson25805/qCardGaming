@@ -1,0 +1,12 @@
+{
+  "question_order": "random",
+  "time_between_questions": 10,
+  "total_time": 1800,
+  "lives": 5,
+  "sfx": true,
+  "music": true,
+  "music_choice": "",
+  "question_mode": "one_each",
+  "enemy_speed_multiplier": 1.0,
+  "muzzle_flash": true
+}
