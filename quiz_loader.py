@@ -6,14 +6,24 @@ Functions to load question CSVs and generate distractors.
 import csv
 import random
 
+
 def load_questions(csv_path):
     rows = []
-    with open(csv_path, encoding='utf-8') as f:
+    with open(csv_path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for r in reader:
-            if r.get('question') and r.get('answer'):
-                rows.append({'id': r.get('id'), 'q': r['question'], 'a': r['answer'], 'subject': r.get('subject',''), 'difficulty': r.get('difficulty','')})
+            if r.get("question") and r.get("answer"):
+                rows.append(
+                    {
+                        "id": r.get("id"),
+                        "q": r["question"],
+                        "a": r["answer"],
+                        "subject": r.get("subject", ""),
+                        "difficulty": r.get("difficulty", ""),
+                    }
+                )
     return rows
+
 
 def is_number(s):
     try:
@@ -22,12 +32,13 @@ def is_number(s):
     except:
         return False
 
+
 def make_distractors(correct, pool):
     candidates = set()
     if is_number(correct):
         try:
             val = float(correct)
-            nums = [val-1, val+1, val+2, val-2, val*10]
+            nums = [val - 1, val + 1, val + 2, val - 2, val * 10]
             for n in nums:
                 if len(candidates) >= 3:
                     break

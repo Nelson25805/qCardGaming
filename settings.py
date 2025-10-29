@@ -9,6 +9,7 @@ from pathlib import Path
 
 SETTINGS_FILE = "settings.json"
 
+
 @dataclass
 class Settings:
     # question order: "top", "bottom", "random"
