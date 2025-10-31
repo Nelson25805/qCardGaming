@@ -38,7 +38,10 @@ class Settings:
             return Settings()
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-            return Settings(**data)
+            # allow only dataclass fields (ignore unknown keys)
+            allowed = set(Settings.__dataclass_fields__.keys())
+            filtered = {k: v for k, v in data.items() if k in allowed}
+            return Settings(**filtered)
         except Exception:
             return Settings()
 
