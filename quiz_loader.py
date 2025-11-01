@@ -34,7 +34,9 @@ def is_number(s):
 
 
 def make_distractors(correct, pool):
-    candidates = set()
+    candidates = []
+    added = set()
+
     if is_number(correct):
         try:
             val = float(correct)
@@ -44,19 +46,26 @@ def make_distractors(correct, pool):
                     break
                 if n != val:
                     s = str(int(n)) if abs(n - int(n)) < 1e-9 else str(n)
-                    if s != correct:
-                        candidates.add(s)
-        except:
+                    if s != correct and s not in added:
+                        candidates.append(s)
+                        added.add(s)
+        except Exception:
             pass
+
     for p in pool:
         if len(candidates) >= 3:
             break
-        if p != correct:
-            candidates.add(p)
+        if p != correct and p not in added:
+            candidates.append(p)
+            added.add(p)
+
     i = 0
     while len(candidates) < 3:
-        candidates.add(f"{correct}_alt{i}")
+        alt = f"{correct}_alt{i}"
+        if alt not in added:
+            candidates.append(alt)
+            added.add(alt)
         i += 1
-    res = list(candidates)[:3]
-    random.shuffle(res)
-    return res
+
+    random.shuffle(candidates)
+    return candidates[:3]
