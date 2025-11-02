@@ -44,7 +44,7 @@ class SpaceGame:
         self.initial_lives = 3
         self.pending_target = None
         self.muzzle_timer = 0
-        self.state = 'asking'
+        self.state = "asking"
         self.current_q = None
         self.choices = []
         self.correct_choice_index = 0
@@ -68,19 +68,19 @@ class SpaceGame:
         # apply question order based on settings (defaults handled by settings object)
         order = None
         if self.settings is not None:
-            order = getattr(self.settings, 'question_order', None)
-        self.answer_pool = [q['a'] for q in self.questions]
-        if order == 'top':
+            order = getattr(self.settings, "question_order", None)
+        self.answer_pool = [q["a"] for q in self.questions]
+        if order == "top":
             # keep original file order
             pass
-        elif order == 'bottom':
+        elif order == "bottom":
             self.questions.reverse()
         else:
             random.shuffle(self.questions)
 
     def setup_pygame_objects(self):
         # Sprites
-        self.player = Player(SCREEN_W//2, SCREEN_H-40)
+        self.player = Player(SCREEN_W // 2, SCREEN_H - 40)
         self.player_group = pygame.sprite.Group(self.player)
         self.bullets = pygame.sprite.Group()
         self.enemies = pygame.sprite.Group()
@@ -105,13 +105,15 @@ class SpaceGame:
             random.shuffle(self.questions)
         self.current_q = self.questions[self.question_index]
         self.question_index += 1
-        distractors = quiz_loader.make_distractors(self.current_q['a'], self.answer_pool)
-        self.choices = distractors + [self.current_q['a']]
+        distractors = quiz_loader.make_distractors(
+            self.current_q["a"], self.answer_pool
+        )
+        self.choices = distractors + [self.current_q["a"]]
         random.shuffle(self.choices)
-        self.correct_choice_index = self.choices.index(self.current_q['a'])
-        self.state = 'asking'
+        self.correct_choice_index = self.choices.index(self.current_q["a"])
+        self.state = "asking"
         # reset per-question timer if configured
-        if getattr(self, 'time_between_questions_ms', None) is not None:
+        if getattr(self, "time_between_questions_ms", None) is not None:
             self.question_timer_ms = int(self.time_between_questions_ms)
         else:
             self.question_timer_ms = None
@@ -120,11 +122,11 @@ class SpaceGame:
     def load_sounds(self, folder):
         base = Path(folder)
         try:
-            self.fire_snd = pygame.mixer.Sound(str(base / 'fire.wav'))
+            self.fire_snd = pygame.mixer.Sound(str(base / "fire.wav"))
         except:
             self.fire_snd = None
         try:
-            self.hit_snd = pygame.mixer.Sound(str(base / 'hit.wav'))
+            self.hit_snd = pygame.mixer.Sound(str(base / "hit.wav"))
         except:
             self.hit_snd = None
 
@@ -146,22 +148,24 @@ class SpaceGame:
         self.setup_pygame_objects()
         # apply settings defaults: lives, music, sfx, enemy speed multiplier, timers
         if self.settings is not None:
-            if getattr(self.settings, 'lives', None) is None:
+            if getattr(self.settings, "lives", None) is None:
                 self.lives = 9999999  # effectively unlimited
             else:
                 self.lives = int(self.settings.lives)
             self.initial_lives = self.lives
             # enemy speed multiplier
-            self.enemy_speed = self.enemy_speed * float(getattr(self.settings, 'enemy_speed_multiplier', 1.0))
+            self.enemy_speed = self.enemy_speed * float(
+                getattr(self.settings, "enemy_speed_multiplier", 1.0)
+            )
             # total session timer (seconds) -> convert to milliseconds counter
-            total_time = getattr(self.settings, 'total_time', None)
+            total_time = getattr(self.settings, "total_time", None)
             if total_time is None:
                 self.session_time_ms = None
             else:
                 # if user set minutes, settings may already be seconds; we'll accept seconds here
                 self.session_time_ms = int(total_time * 1000)
             # time between questions (stored in settings as seconds OR milliseconds; accept string/int/float)
-            tbq = getattr(self.settings, 'time_between_questions', None)
+            tbq = getattr(self.settings, "time_between_questions", None)
             if tbq is None:
                 self.time_between_questions_ms = None
             else:
@@ -176,7 +180,9 @@ class SpaceGame:
                 if tbq_val is None:
                     # fallback: treat as seconds parsed from string digits
                     try:
-                        tbq_val = float(''.join([c for c in str(tbq) if (c.isdigit() or c=='.')]))
+                        tbq_val = float(
+                            "".join([c for c in str(tbq) if (c.isdigit() or c == ".")])
+                        )
                     except Exception:
                         tbq_val = None
                 if tbq_val is None:
@@ -189,9 +195,9 @@ class SpaceGame:
                         # treat as seconds -> convert to ms
                         self.time_between_questions_ms = int(tbq_val * 1000)
             # sfx/music flags
-            self.sfx_enabled = bool(getattr(self.settings, 'sfx', True))
-            self.music_enabled = bool(getattr(self.settings, 'music', False))
-            self.muzzle_flash = bool(getattr(self.settings, 'muzzle_flash', True))
+            self.sfx_enabled = bool(getattr(self.settings, "sfx", True))
+            self.music_enabled = bool(getattr(self.settings, "music", False))
+            self.muzzle_flash = bool(getattr(self.settings, "muzzle_flash", True))
         else:
             self.session_time_ms = None
             self.time_between_questions_ms = None
@@ -201,9 +207,11 @@ class SpaceGame:
 
         self.load_next_question()
         # music
-        if self.music_enabled and getattr(self.settings, 'music_choice', ''):
+        if self.music_enabled and getattr(self.settings, "music_choice", ""):
             try:
-                pygame.mixer.music.load(str(Path(getattr(self.settings, 'music_choice'))))
+                pygame.mixer.music.load(
+                    str(Path(getattr(self.settings, "music_choice")))
+                )
                 pygame.mixer.music.play(-1)
             except Exception:
                 pass
@@ -218,16 +226,22 @@ class SpaceGame:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                    return 'quit'
+                    return "quit"
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    if self.state == 'asking':
+                    if self.state == "asking":
                         mx, my = event.pos
                         rects = utils.choice_rects(SCREEN_W, SCREEN_H)
                         for i, r in enumerate(rects):
                             if r.collidepoint(mx, my):
                                 if i == self.correct_choice_index:
                                     if len(self.enemies.sprites()) > 0:
-                                        target = min(self.enemies.sprites(), key=lambda e: abs(e.rect.centerx - self.player.rect.centerx))
+                                        target = min(
+                                            self.enemies.sprites(),
+                                            key=lambda e: abs(
+                                                e.rect.centerx
+                                                - self.player.rect.centerx
+                                            ),
+                                        )
                                         start_x = self.player.rect.centerx
                                         start_y = self.player.rect.top
                                         dx = target.rect.centerx - start_x
@@ -244,7 +258,7 @@ class SpaceGame:
                                         self.bullets.add(b)
                                         self.pending_target = target
                                         self.muzzle_timer = 160
-                                        self.state = 'playing'
+                                        self.state = "playing"
                                         if self.fire_snd and self.sfx_enabled:
                                             try:
                                                 self.fire_snd.play()
@@ -252,16 +266,16 @@ class SpaceGame:
                                                 pass
                                     else:
                                         self.score += 100
-                                        if not self.enemies:
+                                        if len(self.enemies) == 0:
                                             self.spawn_enemies()
                                         self.load_next_question()
-                                        self.state = 'asking'
+                                        self.state = "asking"
                                 else:
                                     # if unlimited lives, don't decrement below huge number
                                     if self.lives < 999999:
                                         self.lives -= 1
                                     if self.lives <= 0:
-                                        self.state = 'game_over'
+                                        self.state = "game_over"
                                     else:
                                         self.load_next_question()
                                 break
@@ -269,31 +283,40 @@ class SpaceGame:
             keys = pygame.key.get_pressed()
 
             # update session timer
-            if getattr(self, 'session_time_ms', None) is not None:
+            if getattr(self, "session_time_ms", None) is not None:
                 self.session_elapsed_ms += dt
                 if self.session_elapsed_ms >= self.session_time_ms:
                     # session time up -> game over
-                    self.state = 'game_over'
+                    self.state = "game_over"
 
             # update question timer (only when asking)
-            if self.state == 'asking' and getattr(self, 'question_timer_ms', None) is not None:
+            if (
+                self.state == "asking"
+                and getattr(self, "question_timer_ms", None) is not None
+            ):
                 self.question_timer_ms -= dt
                 if self.question_timer_ms <= 0:
                     # time up for this question -> lose a life (unless lives unlimited)
-                    if getattr(self, 'lives', 0) < 999999:
+                    if getattr(self, "lives", 0) < 999999:
                         self.lives -= 1
                     # advance question or end
                     if self.lives <= 0:
-                        self.state = 'game_over'
+                        self.state = "game_over"
                     else:
                         # when question_mode is 'one_each', running out of questions ends session - otherwise continue
-                        qmode = getattr(self.settings, 'question_mode', 'loop') if getattr(self, 'settings', None) else 'loop'
-                        if qmode == 'one_each' and self.question_index >= len(self.questions):
-                            self.state = 'game_over'
+                        qmode = (
+                            getattr(self.settings, "question_mode", "loop")
+                            if getattr(self, "settings", None)
+                            else "loop"
+                        )
+                        if qmode == "one_each" and self.question_index >= len(
+                            self.questions
+                        ):
+                            self.state = "game_over"
                         else:
                             self.load_next_question()
 
-            if self.state == 'playing':
+            if self.state == "playing":
                 self.player.update(keys)
                 self.bullets.update()
                 self.enemies.update()
@@ -311,7 +334,9 @@ class SpaceGame:
                         for e in self.enemies:
                             e.rect.y += 10
 
-                hits = pygame.sprite.groupcollide(self.enemies, self.bullets, True, True)
+                hits = pygame.sprite.groupcollide(
+                    self.enemies, self.bullets, True, True
+                )
                 if hits:
                     self.score += 100 * len(hits)
                     if self.hit_snd and self.sfx_enabled:
@@ -321,18 +346,25 @@ class SpaceGame:
                             pass
                     if self.pending_target is not None:
                         self.pending_target = None
-                    if not self.enemies:
+                    if len(self.enemies) == 0:
                         self.spawn_enemies()
                     self.load_next_question()
 
                 # forced hit via proximity
                 if self.pending_target is not None:
                     for b in list(self.bullets):
-                        if getattr(b, 'target', None) is self.pending_target:
+                        if getattr(b, "target", None) is self.pending_target:
                             dx = b.posx - self.pending_target.rect.centerx
                             dy = b.posy - self.pending_target.rect.centery
                             dist = math.hypot(dx, dy)
-                            collision_radius = max(14, (self.pending_target.rect.width + self.pending_target.rect.height) // 6)
+                            collision_radius = max(
+                                14,
+                                (
+                                    self.pending_target.rect.width
+                                    + self.pending_target.rect.height
+                                )
+                                // 6,
+                            )
                             if dist <= collision_radius:
                                 try:
                                     self.pending_target.kill()
@@ -346,15 +378,15 @@ class SpaceGame:
                                     except:
                                         pass
                                 self.pending_target = None
-                                if not self.enemies:
+                                if len(self.enemies) == 0:
                                     self.spawn_enemies()
                                 self.load_next_question()
                                 break
 
                 if len(self.bullets) == 0:
-                    self.state = 'asking'
+                    self.state = "asking"
 
-            elif self.state == 'asking':
+            elif self.state == "asking":
                 self.player.update(keys)
                 self.bullets.update()
                 self.enemies.update()
@@ -382,27 +414,33 @@ class SpaceGame:
                 pygame.draw.circle(screen, (255, 220, 80), (mx, my), 8)
 
             # HUD - top-left (score,lives) already present; add timers/music to top-right
-            hud = font.render(f"Score: {self.score}   Lives: {self.lives}", True, (255, 255, 255))
+            hud = font.render(
+                f"Score: {self.score}   Lives: {self.lives}", True, (255, 255, 255)
+            )
             screen.blit(hud, (10, 10))
 
             # build status strings for top-right
             # session remaining
-            if getattr(self, 'session_time_ms', None) is not None:
+            if getattr(self, "session_time_ms", None) is not None:
                 remaining = max(0, int(self.session_time_ms - self.session_elapsed_ms))
                 session_str = f"Session: {format_time_ms(remaining)}"
             else:
                 session_str = "Session: ∞"
 
             # question timer remaining
-            if getattr(self, 'question_timer_ms', None) is not None:
+            if getattr(self, "question_timer_ms", None) is not None:
                 qstr = f"Q time: {format_time_ms(self.question_timer_ms)}"
             else:
                 qstr = "Q time: ∞"
 
             # music status
             music_label = "Music: Off"
-            if getattr(self, 'music_enabled', False):
-                mc = getattr(self.settings, 'music_choice', '') if getattr(self, 'settings', None) else ''
+            if getattr(self, "music_enabled", False):
+                mc = (
+                    getattr(self.settings, "music_choice", "")
+                    if getattr(self, "settings", None)
+                    else ""
+                )
                 if mc:
                     music_label = f"Music: On ({Path(mc).name})"
                 else:
@@ -416,16 +454,22 @@ class SpaceGame:
             # right-align them
             screen.blit(right1, (sx - right1.get_width(), 8))
             screen.blit(right2, (sx - right2.get_width(), 8 + right1.get_height() + 2))
-            screen.blit(right3, (sx - right3.get_width(), 8 + right1.get_height() + right2.get_height() + 6))
+            screen.blit(
+                right3,
+                (
+                    sx - right3.get_width(),
+                    8 + right1.get_height() + right2.get_height() + 6,
+                ),
+            )
 
-            if self.state == 'asking' and self.current_q:
+            if self.state == "asking" and self.current_q:
                 overlay = pygame.Surface((SCREEN_W - 60, SCREEN_H - 220))
                 overlay.set_alpha(220)
                 overlay.fill((30, 30, 60))
                 ox = 30
                 oy = 80
                 screen.blit(overlay, (ox, oy))
-                qlines = utils.wrap_text(self.current_q['q'], bigfont, SCREEN_W - 120)
+                qlines = utils.wrap_text(self.current_q["q"], bigfont, SCREEN_W - 120)
                 qy = oy + 12
                 for line in qlines:
                     textsurf = bigfont.render(line, True, (255, 255, 255))
@@ -437,30 +481,38 @@ class SpaceGame:
                     lines = utils.wrap_text(self.choices[i], font, r.w - 16)
                     ty = r.y + 6
                     for ln in lines:
-                        screen.blit(font.render(ln, True, (255, 255, 255)), (r.x + 8, ty))
+                        screen.blit(
+                            font.render(ln, True, (255, 255, 255)), (r.x + 8, ty)
+                        )
                         ty += font.get_height() + 2
 
-            elif self.state == 'game_over':
+            elif self.state == "game_over":
                 go = bigfont.render("GAME OVER", True, (255, 50, 50))
-                screen.blit(go, (SCREEN_W // 2 - go.get_width() // 2, SCREEN_H // 2 - 40))
-                hint = font.render("Press R to restart or Q to quit.", True, (255, 255, 255))
-                screen.blit(hint, (SCREEN_W // 2 - hint.get_width() // 2, SCREEN_H // 2 + 10))
+                screen.blit(
+                    go, (SCREEN_W // 2 - go.get_width() // 2, SCREEN_H // 2 - 40)
+                )
+                hint = font.render(
+                    "Press R to restart or Q to quit.", True, (255, 255, 255)
+                )
+                screen.blit(
+                    hint, (SCREEN_W // 2 - hint.get_width() // 2, SCREEN_H // 2 + 10)
+                )
                 keys = pygame.key.get_pressed()
                 if keys[pygame.K_r]:
                     # restart using settings defaults
-                    if getattr(self.settings, 'lives', None) is None:
+                    if getattr(self.settings, "lives", None) is None:
                         self.lives = 9999999
                     else:
-                        self.lives = int(getattr(self.settings, 'lives', 3))
+                        self.lives = int(getattr(self.settings, "lives", 3))
                     self.initial_lives = self.lives
                     self.score = 0
                     self.spawn_enemies()
                     self.session_elapsed_ms = 0
                     self.load_next_question()
-                    self.state = 'asking'
+                    self.state = "asking"
                 if keys[pygame.K_q]:
                     running = False
-                    return 'quit'
+                    return "quit"
 
             pygame.display.flip()
 
@@ -501,7 +553,12 @@ class Bullet(pygame.sprite.Sprite):
         self.posy += self.vy
         self.rect.centerx = int(self.posx)
         self.rect.centery = int(self.posy)
-        if (self.rect.bottom < -50 or self.rect.top > SCREEN_H + 50 or self.rect.left > SCREEN_W + 50 or self.rect.right < -50):
+        if (
+            self.rect.bottom < -50
+            or self.rect.top > SCREEN_H + 50
+            or self.rect.left > SCREEN_W + 50
+            or self.rect.right < -50
+        ):
             self.kill()
 
 
