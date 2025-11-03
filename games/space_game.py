@@ -99,7 +99,14 @@ class SpaceGame:
     # -- quiz helper --
     def load_next_question(self):
         if not self.questions:
+            # no questions available — set safe defaults so UI can render and we don't crash
+            self.current_q = None
+            self.choices = []
+            self.correct_choice_index = -1
+            self.state = "asking"
+            self.question_timer_ms = None
             return
+
         if self.question_index >= len(self.questions):
             self.question_index = 0
             random.shuffle(self.questions)
