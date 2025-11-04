@@ -238,7 +238,7 @@ class SpaceGame:
                     if self.state == "asking":
                         mx, my = event.pos
                         rects = utils.choice_rects(SCREEN_W, SCREEN_H)
-                        for i, r in enumerate(rects):
+                        for i, r in enumerate(rects[: len(self.choices)]):
                             if r.collidepoint(mx, my):
                                 if i == self.correct_choice_index:
                                     if len(self.enemies.sprites()) > 0:
@@ -483,7 +483,7 @@ class SpaceGame:
                     screen.blit(textsurf, (ox + 18, qy))
                     qy += textsurf.get_height() + 4
                 rects = utils.choice_rects(SCREEN_W, SCREEN_H)
-                for i, r in enumerate(rects):
+                for i, r in enumerate(rects[: len(self.choices)]):
                     pygame.draw.rect(screen, (80, 80, 120), r, border_radius=6)
                     lines = utils.wrap_text(self.choices[i], font, r.w - 16)
                     ty = r.y + 6
