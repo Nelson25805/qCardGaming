@@ -40,6 +40,7 @@ class SpaceGame:
         self.enemy_dir = 1
         self.enemy_speed = 0.5
         self.score = 0
+        # Use None for unlimited lives, integer for finite lives
         self.lives = 3
         self.initial_lives = 3
         self.pending_target = None
@@ -156,7 +157,8 @@ class SpaceGame:
         # apply settings defaults: lives, music, sfx, enemy speed multiplier, timers
         if self.settings is not None:
             if getattr(self.settings, "lives", None) is None:
-                self.lives = 9999999  # effectively unlimited
+                # represent unlimited lives with None
+                self.lives = None
             else:
                 self.lives = int(self.settings.lives)
             self.initial_lives = self.lives
@@ -278,10 +280,11 @@ class SpaceGame:
                                         self.load_next_question()
                                         self.state = "asking"
                                 else:
-                                    # if unlimited lives, don't decrement below huge number
-                                    if self.lives < 999999:
+                                    # decrement only when lives are finite (not None)
+                                    if self.lives is not None:
                                         self.lives -= 1
-                                    if self.lives <= 0:
+                                    # check for game over only if lives are numeric
+                                    if self.lives is not None and self.lives <= 0:
                                         self.state = "game_over"
                                     else:
                                         self.load_next_question()
@@ -304,10 +307,10 @@ class SpaceGame:
                 self.question_timer_ms -= dt
                 if self.question_timer_ms <= 0:
                     # time up for this question -> lose a life (unless lives unlimited)
-                    if getattr(self, "lives", 0) < 999999:
+                    if self.lives is not None:
                         self.lives -= 1
                     # advance question or end
-                    if self.lives <= 0:
+                    if self.lives is not None and self.lives <= 0:
                         self.state = "game_over"
                     else:
                         # when question_mode is 'one_each', running out of questions ends session - otherwise continue
@@ -421,8 +424,9 @@ class SpaceGame:
                 pygame.draw.circle(screen, (255, 220, 80), (mx, my), 8)
 
             # HUD - top-left (score,lives) already present; add timers/music to top-right
+            lives_display = "∞" if self.lives is None else str(self.lives)
             hud = font.render(
-                f"Score: {self.score}   Lives: {self.lives}", True, (255, 255, 255)
+                f"Score: {self.score}   Lives: {lives_display}", True, (255, 255, 255)
             )
             screen.blit(hud, (10, 10))
 
@@ -508,7 +512,7 @@ class SpaceGame:
                 if keys[pygame.K_r]:
                     # restart using settings defaults
                     if getattr(self.settings, "lives", None) is None:
-                        self.lives = 9999999
+                        self.lives = None
                     else:
                         self.lives = int(getattr(self.settings, "lives", 3))
                     self.initial_lives = self.lives
