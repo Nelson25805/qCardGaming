@@ -336,20 +336,40 @@ def run_settings_screen(screen, settings: Settings):
                 def content_row_y(idx):
                     return row_y(idx)
 
-                # TBQ row
+                # TBQ / Total / Lives rows - define rects first, then handle clicks
                 y0 = content_row_y(0)
+                y1 = content_row_y(1)
+                y2 = content_row_y(2)
+
+                # TBQ rects
                 tbq_tb = textbox_rect_for(y0)
                 tbq_u0 = unit_rect_for(y0, 0)
                 tbq_u1 = unit_rect_for(y0, 1)
                 tbq_unlim = unlimited_rect_for(y0)
                 tbq_chips = chips_rect_for(y0)
 
+                # Total rects
+                total_tb = textbox_rect_for(y1)
+                total_u0 = unit_rect_for(y1, 0)
+                total_u1 = unit_rect_for(y1, 1)
+                total_unlim = unlimited_rect_for(y1)
+                total_chips = chips_rect_for(y1)
+
+                # Lives rects
+                lives_tb = textbox_rect_for(y2)
+                lives_unlim_rect = unlimited_rect_for(y2)
+                lives_chips = chips_rect_for(y2)
+
+                # Now handle clicks (use elif so only one action fires per click)
                 if tbq_tb.collidepoint(content_x, content_y):
                     focused = "tbq"
                 elif tbq_u0.collidepoint(content_x, content_y):
-                    # set seconds; if not unlimited, convert digits
+                    # TBQ 's' - clicking 's' turns off unlimited and sets sensible default if needed
                     if tbq_unlimited:
+                        tbq_unlimited = False
                         tbq_unit = "s"
+                        if tbq_digits == "":
+                            tbq_digits = str(max(TBQ_MIN_S, tbq_presets[0]))
                     else:
                         tbq_digits = convert_tbq_digits_on_unit_change(
                             tbq_digits, tbq_unit, "s"
@@ -357,8 +377,12 @@ def run_settings_screen(screen, settings: Settings):
                         tbq_unit = "s"
                     focused = "tbq"
                 elif tbq_u1.collidepoint(content_x, content_y):
+                    # TBQ 'm'
                     if tbq_unlimited:
+                        tbq_unlimited = False
                         tbq_unit = "m"
+                        if tbq_digits == "":
+                            tbq_digits = "1"
                     else:
                         tbq_digits = convert_tbq_digits_on_unit_change(
                             tbq_digits, tbq_unit, "m"
@@ -385,19 +409,15 @@ def run_settings_screen(screen, settings: Settings):
                             break
                         cx += 72
 
-                # Total row
-                y1 = content_row_y(1)
-                total_tb = textbox_rect_for(y1)
-                total_u0 = unit_rect_for(y1, 0)
-                total_u1 = unit_rect_for(y1, 1)
-                total_unlim = unlimited_rect_for(y1)
-                total_chips = chips_rect_for(y1)
-
+                # Total row handlers
                 if total_tb.collidepoint(content_x, content_y):
                     focused = "total"
                 elif total_u0.collidepoint(content_x, content_y):
                     if total_unlimited:
+                        total_unlimited = False
                         total_unit = "m"
+                        if total_digits == "":
+                            total_digits = str(max(TOTAL_MIN_MIN, total_presets_min[0]))
                     else:
                         total_digits = convert_total_digits_on_unit_change(
                             total_digits, total_unit, "m"
@@ -406,7 +426,10 @@ def run_settings_screen(screen, settings: Settings):
                     focused = "total"
                 elif total_u1.collidepoint(content_x, content_y):
                     if total_unlimited:
+                        total_unlimited = False
                         total_unit = "h"
+                        if total_digits == "":
+                            total_digits = "1"
                     else:
                         total_digits = convert_total_digits_on_unit_change(
                             total_digits, total_unit, "h"
@@ -433,12 +456,7 @@ def run_settings_screen(screen, settings: Settings):
                             break
                         cx += 72
 
-                # Lives row
-                y2 = content_row_y(2)
-                lives_tb = textbox_rect_for(y2)
-                lives_unlim_rect = unlimited_rect_for(y2)
-                lives_chips = chips_rect_for(y2)
-
+                # Lives row handlers
                 if lives_tb.collidepoint(content_x, content_y):
                     focused = "lives"
                 elif lives_unlim_rect.collidepoint(content_x, content_y):

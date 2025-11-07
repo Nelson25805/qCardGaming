@@ -1,7 +1,7 @@
 {
   "question_order": "random",
-  "time_between_questions": 60,
-  "total_time": 900,
+  "time_between_questions": null,
+  "total_time": 3600,
   "lives": 10,
   "sfx": true,
   "music": true,
