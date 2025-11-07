@@ -39,7 +39,7 @@ def run_settings_screen(screen, settings: Settings):
     total_presets_min = [5, 15, 30, 60]  # minutes
     lives_presets = [3, 5, 10]
 
-    # ---- small helpers ----
+    # ---- helpers ----
     def safe_int(x, default=None):
         try:
             return int(x)
@@ -125,7 +125,7 @@ def run_settings_screen(screen, settings: Settings):
         lives_unlimited = False
         lives_digits = str(int(settings.lives))
 
-    # ---- the other options (now in single left column) ----
+    # ---- other options (single-column) ----
     opts = [
         (
             "Question order",
@@ -139,14 +139,15 @@ def run_settings_screen(screen, settings: Settings):
         ("Muzzle flash", ["on", "off"], "on" if settings.muzzle_flash else "off"),
     ]
 
-    # ---- layout: single-column flow ----
+    # ---- layout: header + scrollable content + fixed bottom ----
     SCREEN_W, SCREEN_H = screen.get_size()
     LEFT_X = 56
-    LABEL_W = 240  # label area width
+    LABEL_W = 240
     INPUT_X = LEFT_X + LABEL_W + 12
-    BASE_Y = 100
-    ROW_H = 110  # enough vertical room for chips + buttons
-    textbox_w = 180  # smaller input width so label + control fit on a single line
+    HEADER_H = 84  # header region (title + help) fixed at top
+    BASE_Y = HEADER_H + 24  # content starts below header
+    ROW_H = 110
+    textbox_w = 180
     unit_w = 44
     chip_h = 28
     bottom_fixed_height = 96
@@ -154,13 +155,13 @@ def run_settings_screen(screen, settings: Settings):
     content_rows = 3 + len(opts)
     content_h = BASE_Y + content_rows * ROW_H + 40
     content_surf = pygame.Surface(
-        (SCREEN_W, max(content_h, SCREEN_H - bottom_fixed_height)),
+        (SCREEN_W, max(content_h, SCREEN_H - bottom_fixed_height - HEADER_H)),
         flags=pygame.SRCALPHA,
     )
     scroll_y = 0
-    max_scroll = max(0, content_surf.get_height() - (SCREEN_H - bottom_fixed_height))
+    content_view_h = SCREEN_H - bottom_fixed_height - HEADER_H
+    max_scroll = max(0, content_surf.get_height() - content_view_h)
 
-    # UI state
     running = True
     focused = None  # "tbq","total","lives" or None
     caret_timer = 0
@@ -175,7 +176,10 @@ def run_settings_screen(screen, settings: Settings):
 
     # rect helpers (content coords)
     def row_y(idx):
-        return BASE_Y + idx * ROW_H
+        # idx=0 -> first row. content_surf top is 0, but we'll place content at BASE_Y on content coords earlier
+        return (
+            24 + idx * ROW_H
+        )  # relative to content_surf coordinate system (content_surf top corresponds to BASE_Y on screen)
 
     def textbox_rect_for(y):
         return pygame.Rect(INPUT_X, y - 12, textbox_w, 36)
@@ -191,6 +195,7 @@ def run_settings_screen(screen, settings: Settings):
     def chips_rect_for(y):
         return pygame.Rect(INPUT_X, y + 36, textbox_w + 200, chip_h + 8)
 
+    # main loop
     while running:
         dt = clock.tick(60)
         caret_timer += dt
@@ -207,7 +212,7 @@ def run_settings_screen(screen, settings: Settings):
             if event.type == pygame.QUIT:
                 return "quit"
 
-            # scroll with wheel
+            # scrolling
             if event.type == pygame.MOUSEWHEEL:
                 scroll_y -= event.y * 40
                 scroll_y = max(0, min(scroll_y, max_scroll))
@@ -220,7 +225,7 @@ def run_settings_screen(screen, settings: Settings):
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mx, my = event.pos
-                # bottom fixed area (Back/Save)
+                # fixed bottom Back/Save
                 back_rect = utils.button_rect(120, SCREEN_H - 40, w=160, h=48)
                 save_rect = utils.button_rect(
                     SCREEN_W - 120, SCREEN_H - 40, w=160, h=48
@@ -229,9 +234,8 @@ def run_settings_screen(screen, settings: Settings):
                     running = False
                     continue
                 if save_rect.collidepoint(mx, my):
-                    # validate & save (map UI to settings)
+                    # validate & save
                     valid = True
-                    # TBQ
                     if tbq_unlimited:
                         settings.time_between_questions = None
                     else:
@@ -254,8 +258,6 @@ def run_settings_screen(screen, settings: Settings):
                                     )
                                 else:
                                     settings.time_between_questions = int(secs)
-
-                    # Total
                     if valid:
                         if total_unlimited:
                             settings.total_time = None
@@ -279,7 +281,6 @@ def run_settings_screen(screen, settings: Settings):
                                         )
                                     else:
                                         settings.total_time = int(mins * 60)
-                    # Lives
                     if valid:
                         if lives_unlimited:
                             settings.lives = None
@@ -301,7 +302,7 @@ def run_settings_screen(screen, settings: Settings):
                                     else:
                                         settings.lives = int(n)
                     if valid:
-                        # apply non-manual opts
+                        # apply other opts
                         for label, choices, cur in opts:
                             if label == "Question order":
                                 settings.question_order = cur
@@ -322,13 +323,21 @@ def run_settings_screen(screen, settings: Settings):
                         running = False
                     continue
 
-                # translate to content coordinates
-                content_x = mx
-                content_y = my + scroll_y
+                # If click is in header area (title/help) we ignore for content clicks
+                if my < HEADER_H:
+                    # do nothing (header fixed)
+                    continue
 
-                # manual rows
+                # translate to content coordinates (content_surf coordinates)
+                content_x = mx
+                content_y = my - HEADER_H + scroll_y
+
+                # row positions within content_surf: row 0 starts at y=24
+                def content_row_y(idx):
+                    return row_y(idx)
+
                 # TBQ row
-                y0 = row_y(0)
+                y0 = content_row_y(0)
                 tbq_tb = textbox_rect_for(y0)
                 tbq_u0 = unit_rect_for(y0, 0)
                 tbq_u1 = unit_rect_for(y0, 1)
@@ -338,6 +347,7 @@ def run_settings_screen(screen, settings: Settings):
                 if tbq_tb.collidepoint(content_x, content_y):
                     focused = "tbq"
                 elif tbq_u0.collidepoint(content_x, content_y):
+                    # set seconds; if not unlimited, convert digits
                     if tbq_unlimited:
                         tbq_unit = "s"
                     else:
@@ -376,7 +386,7 @@ def run_settings_screen(screen, settings: Settings):
                         cx += 72
 
                 # Total row
-                y1 = row_y(1)
+                y1 = content_row_y(1)
                 total_tb = textbox_rect_for(y1)
                 total_u0 = unit_rect_for(y1, 0)
                 total_u1 = unit_rect_for(y1, 1)
@@ -414,17 +424,17 @@ def run_settings_screen(screen, settings: Settings):
                 elif total_chips.collidepoint(content_x, content_y):
                     cx = total_chips.x + 6
                     for p in total_presets_min:
-                        chip_rect = pygame.Rect(cx, total_chips.y + 6, 72, chip_h)
+                        chip_rect = pygame.Rect(cx, total_chips.y + 6, 64, chip_h)
                         if chip_rect.collidepoint(content_x, content_y):
                             total_unlimited = False
                             total_unit = "m"
                             total_digits = str(p)
                             focused = "total"
                             break
-                        cx += 80
+                        cx += 72
 
                 # Lives row
-                y2 = row_y(2)
+                y2 = content_row_y(2)
                 lives_tb = textbox_rect_for(y2)
                 lives_unlim_rect = unlimited_rect_for(y2)
                 lives_chips = chips_rect_for(y2)
@@ -449,12 +459,11 @@ def run_settings_screen(screen, settings: Settings):
                             break
                         cx += 72
 
-                # Now the remaining options below manual rows (single column)
+                # remaining options matrix (single-column below manual rows)
                 for i, (label, choices, cur) in enumerate(opts):
-                    ry = row_y(3 + i)
-                    label_rect = pygame.Rect(LEFT_X, ry - 12, LABEL_W, 36)
-                    value_rect = pygame.Rect(INPUT_X, ry - 12, textbox_w + 120, 36)
-                    if value_rect.collidepoint(content_x, content_y):
+                    ry = content_row_y(3 + i)
+                    val_rect = pygame.Rect(INPUT_X, ry - 12, textbox_w + 120, 36)
+                    if val_rect.collidepoint(content_x, content_y):
                         try:
                             idx = choices.index(cur)
                         except ValueError:
@@ -464,7 +473,6 @@ def run_settings_screen(screen, settings: Settings):
                         break
 
             if event.type == pygame.KEYDOWN:
-                # keyboard editing for focused textbox
                 if focused == "tbq":
                     if event.key == pygame.K_ESCAPE:
                         focused = None
@@ -514,12 +522,20 @@ def run_settings_screen(screen, settings: Settings):
                     if event.key == pygame.K_ESCAPE:
                         running = False
 
-        # ---- draw content into content_surf ----
-        content_surf.fill((22, 22, 34))
+        # ---- draw header (fixed) ----
+        screen.fill((18, 18, 28))
         title = big.render("Settings", True, (255, 255, 255))
-        content_surf.blit(title, (SCREEN_W // 2 - title.get_width() // 2, 16))
+        screen.blit(title, (SCREEN_W // 2 - title.get_width() // 2, 12))
+        # help text placed under title and fixed
+        help_text = "Click an input to edit; units convert; chips = quick presets."
+        help_surf = small.render(help_text, True, (170, 170, 190))
+        screen.blit(help_surf, (SCREEN_W // 2 - help_surf.get_width() // 2, 48))
 
-        # Draw manual rows with label on left and input on right
+        # ---- draw content onto content_surf ----
+        content_surf.fill((22, 22, 34))
+
+        # content starts with a small header area so row_y(0) looks nice
+        # draw rows in content_surf's coordinate system where top y=0 corresponds to BASE_Y on screen
         def draw_manual_row(
             surface,
             label_text,
@@ -532,13 +548,13 @@ def run_settings_screen(screen, settings: Settings):
             chips,
         ):
             y = row_y(idx)
-            # label
             surface.blit(font.render(label_text, True, (210, 210, 210)), (LEFT_X, y))
-            # textbox
             tb = textbox_rect_for(y)
             pygame.draw.rect(surface, (38, 38, 58), tb, border_radius=8)
+            # focus outline
             if focused == focused_name:
                 pygame.draw.rect(surface, (100, 140, 200), tb, width=2, border_radius=8)
+            # display
             disp = format_manual_display(digits, unit, unlimited)
             caret = (
                 "▌"
@@ -548,11 +564,19 @@ def run_settings_screen(screen, settings: Settings):
             surface.blit(
                 font.render(disp + caret, True, (180, 180, 255)), (tb.x + 8, tb.y + 6)
             )
-            # unit buttons
+            # unit buttons: draw highlight *behind* text so letters remain visible
             u0 = unit_rect_for(y, 0)
             u1 = unit_rect_for(y, 1)
+            # base
             pygame.draw.rect(surface, (56, 56, 86), u0, border_radius=6)
             pygame.draw.rect(surface, (56, 56, 86), u1, border_radius=6)
+            # highlight if active (draw filled then text on top)
+            if not unlimited:
+                if unit == unit_labels[0]:
+                    pygame.draw.rect(surface, (100, 140, 200), u0, border_radius=6)
+                else:
+                    pygame.draw.rect(surface, (100, 140, 200), u1, border_radius=6)
+            # write unit letters on top
             surface.blit(
                 small.render(unit_labels[0], True, (255, 255, 255)),
                 (u0.x + 12, u0.y + 8),
@@ -561,25 +585,23 @@ def run_settings_screen(screen, settings: Settings):
                 small.render(unit_labels[1], True, (255, 255, 255)),
                 (u1.x + 12, u1.y + 8),
             )
-            # highlight active unit
-            if not unlimited:
-                if unit == unit_labels[0]:
-                    pygame.draw.rect(surface, (100, 140, 200), u0, border_radius=6)
-                else:
-                    pygame.draw.rect(surface, (100, 140, 200), u1, border_radius=6)
-            # unlimited toggle
+            # unlimited toggle: draw highlight behind text if enabled
             unlim = unlimited_rect_for(y)
-            pygame.draw.rect(surface, (72, 72, 96), unlim, border_radius=6)
+            if unlimited:
+                pygame.draw.rect(surface, (100, 140, 200), unlim, border_radius=6)
+            else:
+                pygame.draw.rect(surface, (72, 72, 96), unlim, border_radius=6)
             surface.blit(
                 font.render("Unlimited", True, (240, 240, 240)),
                 (unlim.x + 10, unlim.y + 6),
             )
-            # chips
-            ch = chips_rect_for(y)
-            cx = ch.x + 6
+            # chips row
+            chips_r = chips_rect_for(y)
+            cx = chips_r.x + 6
             for p in chips:
-                chip_rect = pygame.Rect(cx, ch.y + 6, 64, chip_h)
+                chip_rect = pygame.Rect(cx, chips_r.y + 6, 64, chip_h)
                 pygame.draw.rect(surface, (56, 56, 86), chip_rect, border_radius=6)
+                label = f"{p}{unit_labels[0] if label_text=='Time between Qs' else 'm' if label_text=='Total time' else ''}"
                 if label_text == "Time between Qs":
                     cap = small.render(f"{p}s", True, (220, 220, 255))
                 elif label_text == "Total time":
@@ -595,7 +617,7 @@ def run_settings_screen(screen, settings: Settings):
                 )
                 cx += chip_rect.w + 8
 
-        # TBQ
+        # draw manual rows
         draw_manual_row(
             content_surf,
             "Time between Qs",
@@ -607,7 +629,6 @@ def run_settings_screen(screen, settings: Settings):
             ("s", "m"),
             tbq_presets,
         )
-        # Total
         draw_manual_row(
             content_surf,
             "Total time",
@@ -619,7 +640,7 @@ def run_settings_screen(screen, settings: Settings):
             ("m", "h"),
             total_presets_min,
         )
-        # Lives (reuse but hide units)
+        # Lives (no unit labels)
         y = row_y(2)
         content_surf.blit(font.render("Lives", True, (210, 210, 210)), (LEFT_X, y))
         tb = textbox_rect_for(y)
@@ -639,15 +660,18 @@ def run_settings_screen(screen, settings: Settings):
             font.render(disp_l, True, (180, 180, 255)), (tb.x + 8, tb.y + 6)
         )
         unlim_l = unlimited_rect_for(y)
-        pygame.draw.rect(content_surf, (72, 72, 96), unlim_l, border_radius=6)
+        if lives_unlimited:
+            pygame.draw.rect(content_surf, (100, 140, 200), unlim_l, border_radius=6)
+        else:
+            pygame.draw.rect(content_surf, (72, 72, 96), unlim_l, border_radius=6)
         content_surf.blit(
             font.render("Unlimited", True, (240, 240, 240)),
             (unlim_l.x + 10, unlim_l.y + 6),
         )
-        ch = chips_rect_for(y)
-        cx = ch.x + 6
+        chips_r = chips_rect_for(y)
+        cx = chips_r.x + 6
         for p in lives_presets:
-            chip_rect = pygame.Rect(cx, ch.y + 6, 64, chip_h)
+            chip_rect = pygame.Rect(cx, chips_r.y + 6, 64, chip_h)
             pygame.draw.rect(content_surf, (56, 56, 86), chip_rect, border_radius=6)
             cap = small.render(str(p), True, (220, 220, 255))
             content_surf.blit(
@@ -656,7 +680,7 @@ def run_settings_screen(screen, settings: Settings):
             )
             cx += chip_rect.w + 8
 
-        # Draw remaining options below (single column)
+        # draw remaining options in same column, below manual rows
         for i, (label, choices, cur) in enumerate(opts):
             ry = row_y(3 + i)
             content_surf.blit(font.render(label, True, (210, 210, 210)), (LEFT_X, ry))
@@ -671,22 +695,17 @@ def run_settings_screen(screen, settings: Settings):
                 (val_rect.right + 8, ry + 6),
             )
 
-        # blit scrolled content to screen
-        screen.fill((18, 18, 28))
+        # blit the content_surf at fixed position below header, applying scroll
         screen.blit(
             content_surf,
-            (0, 0),
-            area=pygame.Rect(0, scroll_y, SCREEN_W, SCREEN_H - bottom_fixed_height),
+            (0, HEADER_H),
+            area=pygame.Rect(0, scroll_y, SCREEN_W, content_view_h),
         )
 
-        # top-right help (fixed)
-        help_text = "Click an input to edit; units convert; chips = quick presets."
-        screen.blit(small.render(help_text, True, (170, 170, 190)), (INPUT_X, 60))
-
-        # error area (fixed above buttons)
+        # help text already drawn in header above; draw error area (fixed above bottom buttons)
         if error_msg:
             em = font.render(error_msg, True, (255, 100, 100))
-            screen.blit(em, (LEFT_X, SCREEN_H - bottom_fixed_height + 8))
+            screen.blit(em, (LEFT_X, SCREEN_H - bottom_fixed_height + 12))
 
         # bottom fixed Back/Save
         back = utils.button_rect(120, SCREEN_H - 40, w=160, h=48)
