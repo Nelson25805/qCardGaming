@@ -1,12 +1,12 @@
 {
-  "question_order": "random",
-  "time_between_questions": null,
+  "question_order": "top",
+  "time_between_questions": 60,
   "total_time": 3600,
-  "lives": 10,
+  "lives": 5,
   "sfx": true,
   "music": true,
   "music_choice": "",
-  "question_mode": "loop",
-  "enemy_speed_multiplier": 1.0,
+  "question_mode": "one_each",
+  "enemy_speed_multiplier": 0.75,
   "muzzle_flash": true
 }
