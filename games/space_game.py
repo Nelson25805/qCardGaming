@@ -293,7 +293,7 @@ class SpaceGame:
             keys = pygame.key.get_pressed()
 
             # update session timer
-            if getattr(self, "session_time_ms", None) is not None:
+            if getattr(self, "session_time_ms", None) is not None and self.state != "game_over":
                 self.session_elapsed_ms += dt
                 if self.session_elapsed_ms >= self.session_time_ms:
                     # session time up -> game over
