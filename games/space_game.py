@@ -217,13 +217,23 @@ class SpaceGame:
         self.load_next_question()
         # music
         if self.music_enabled and getattr(self.settings, "music_choice", ""):
-            try:
-                pygame.mixer.music.load(
-                    str(Path(getattr(self.settings, "music_choice")))
-                )
-                pygame.mixer.music.play(-1)
-            except Exception:
-                pass
+            mc = getattr(self.settings, "music_choice", "") or ""
+            # try preferred folders in order: assets/music, music, then literal path
+            candidates = [
+                Path("assets") / "music" / mc,
+                Path("music") / mc,
+                Path(mc),
+            ]
+            for p in candidates:
+                if p.exists() and p.is_file():
+                    try:
+                        pygame.mixer.music.load(str(p))
+                        pygame.mixer.music.play(-1)
+                    except Exception:
+                        # load failed for this file — try next candidate
+                        pass
+                    break
+
         # timers
         # Note: DO NOT overwrite question_timer_ms here — load_next_question() already sets it when needed.
         # Keep session timer reset, but preserve question_timer_ms so the first question countdown starts immediately.
@@ -293,7 +303,10 @@ class SpaceGame:
             keys = pygame.key.get_pressed()
 
             # update session timer
-            if getattr(self, "session_time_ms", None) is not None and self.state != "game_over":
+            if (
+                getattr(self, "session_time_ms", None) is not None
+                and self.state != "game_over"
+            ):
                 self.session_elapsed_ms += dt
                 if self.session_elapsed_ms >= self.session_time_ms:
                     # session time up -> game over

@@ -15,9 +15,20 @@ def list_csv_files(folder):
     return sorted([p.name for p in Path(folder).glob("*.csv")])
 
 
-def list_music_files(folder):
+def find_music_files():
+    """Return music filenames found in assets/music, music, then the current folder.
+    Filenames are unique and returned in order of preference (assets/music first)."""
     exts = (".mp3", ".ogg", ".wav", ".flac")
-    return sorted([p.name for p in Path(folder).glob("*") if p.suffix.lower() in exts])
+    candidates = []
+    search_dirs = [Path("assets") / "music", Path("music"), Path(".")]
+    for d in search_dirs:
+        if d.exists() and d.is_dir():
+            for p in sorted(d.iterdir()):
+                if p.suffix.lower() in exts:
+                    name = p.name
+                    if name not in candidates:
+                        candidates.append(name)
+    return candidates
 
 
 def run_menu():

@@ -88,6 +88,20 @@ def run_settings_screen(screen, settings: Settings):
         except Exception:
             return default
 
+    def find_music_files():
+        """Search assets/music, music, then current folder for audio files and return unique filenames."""
+        exts = (".mp3", ".ogg", ".wav", ".flac")
+        candidates = []
+        search_dirs = [Path("assets") / "music", Path("music"), Path(".")]
+        for d in search_dirs:
+            if d.exists() and d.is_dir():
+                for p in sorted(d.iterdir()):
+                    if p.suffix.lower() in exts:
+                        name = p.name
+                        if name not in candidates:
+                            candidates.append(name)
+        return candidates
+
     def secs_to_display(secs):
         if secs is None:
             return ("", "s", True)
@@ -167,11 +181,24 @@ def run_settings_screen(screen, settings: Settings):
         lives_unlimited = False
         lives_digits = str(int(settings.lives))
 
-    # ---- other options (single-column) ----
+        # gather available music files
+    music_files = find_music_files()
+    music_choices = ["None"] + music_files
+    current_music_label = (
+        Path(getattr(settings, "music_choice", "")).name
+        if getattr(settings, "music_choice", "")
+        else "None"
+    )
+
     opts = [
-        ("Question order", ["top", "bottom", "random"], getattr(settings, "question_order")),
+        (
+            "Question order",
+            ["top", "bottom", "random"],
+            getattr(settings, "question_order"),
+        ),
         ("SFX", ["on", "off"], "on" if settings.sfx else "off"),
         ("Music", ["off", "on"], "on" if settings.music else "off"),
+        ("Music file", music_choices, current_music_label),
         ("Question mode", ["loop", "one_each"], settings.question_mode),
         ("Enemy speed", ["0.75", "1.0", "1.5"], str(settings.enemy_speed_multiplier)),
         ("Muzzle flash", ["on", "off"], "on" if settings.muzzle_flash else "off"),
@@ -344,6 +371,11 @@ def run_settings_screen(screen, settings: Settings):
                                 settings.sfx = cur == "on"
                             elif label == "Music":
                                 settings.music = cur == "on"
+                            elif label == "Music file":
+                                # store filename (empty string for None)
+                                settings.music_choice = (
+                                    "" if cur in ("None", "none", "") else cur
+                                )
                             elif label == "Question mode":
                                 settings.question_mode = cur
                             elif label == "Enemy speed":
@@ -353,6 +385,7 @@ def run_settings_screen(screen, settings: Settings):
                                     settings.enemy_speed_multiplier = 1.0
                             elif label == "Muzzle flash":
                                 settings.muzzle_flash = cur == "on"
+
                         settings.save()
                         running = False
                     continue
