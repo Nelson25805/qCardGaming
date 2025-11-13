@@ -53,6 +53,8 @@ class SpaceGame:
         # pygame resources
         self.fire_snd = None
         self.hit_snd = None
+        # dictionary of other SFX found (keyed by stem -> pygame.mixer.Sound)
+        self.sfx_bank = {}
 
         # timers
         self.question_timer_ms = None
@@ -127,16 +129,107 @@ class SpaceGame:
             self.question_timer_ms = None
 
     # -- sounds --
-    def load_sounds(self, folder):
-        base = Path(folder)
+    def load_sounds(self, folder=None):
+        """Robustly load sound effects.
+
+        Looks for SFX in (in order):
+          - provided folder (if given)
+          - assets/Sound Effects
+          - assets/SoundEffects
+          - assets/Sound_Effects
+          - assets/sound effects
+          - assets
+          - project root
+
+        Populates:
+          - self.fire_snd
+          - self.hit_snd
+          - self.sfx_bank (dict of other found sounds keyed by file stem)
+        """
+        exts = (".wav", ".ogg", ".mp3", ".flac")
+
+        # best-effort ensure mixer inited
         try:
-            self.fire_snd = pygame.mixer.Sound(str(base / "fire.wav"))
-        except:
-            self.fire_snd = None
-        try:
-            self.hit_snd = pygame.mixer.Sound(str(base / "hit.wav"))
-        except:
-            self.hit_snd = None
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+        except Exception:
+            pass
+
+        def try_load_sound(path: Path):
+            try:
+                return pygame.mixer.Sound(str(path))
+            except Exception:
+                return None
+
+        # candidate directories (preference order)
+        cand_dirs = []
+        if folder:
+            try:
+                cand_dirs.append(Path(folder))
+            except Exception:
+                pass
+        cand_dirs += [
+            Path("assets") / "Sound Effects",
+            Path("assets") / "SoundEffects",
+            Path("assets") / "Sound_Effects",
+            Path("assets") / "sound effects",
+            Path("assets"),
+            Path("."),
+        ]
+
+        # helper to find a specific file by base name (try exact base+ext, then fuzzy match)
+        def find_sound_file(base_name):
+            # exact name try
+            for d in cand_dirs:
+                if not d.exists() or not d.is_dir():
+                    continue
+                for ext in exts:
+                    p = d / f"{base_name}{ext}"
+                    if p.exists() and p.is_file():
+                        return p
+            # fuzzy: pick first file whose stem contains the base_name
+            for d in cand_dirs:
+                if not d.exists() or not d.is_dir():
+                    continue
+                for p in sorted(d.iterdir()):
+                    if p.suffix.lower() in exts and base_name.lower() in p.stem.lower():
+                        return p
+            return None
+
+        # load named primary sounds
+        fpath = find_sound_file("fire")
+        self.fire_snd = try_load_sound(fpath) if fpath is not None else None
+
+        hpath = find_sound_file("hit")
+        self.hit_snd = try_load_sound(hpath) if hpath is not None else None
+
+        # populate sfx_bank by scanning preferred directories
+        self.sfx_bank = {}
+        scanned = set()
+        for d in cand_dirs:
+            if not d.exists() or not d.is_dir():
+                continue
+            for p in sorted(d.iterdir()):
+                if p.suffix.lower() in exts and p.is_file():
+                    key = p.stem.lower()
+                    if key in scanned:
+                        continue
+                    scanned.add(key)
+                    snd = try_load_sound(p)
+                    if snd is not None:
+                        self.sfx_bank[key] = snd
+
+        # fallback mapping for primary sounds if not found directly
+        if self.fire_snd is None:
+            for k in ("fire", "shot", "shoot"):
+                if k in self.sfx_bank:
+                    self.fire_snd = self.sfx_bank[k]
+                    break
+        if self.hit_snd is None:
+            for k in ("hit", "explode", "impact"):
+                if k in self.sfx_bank:
+                    self.hit_snd = self.sfx_bank[k]
+                    break
 
     # -- main run method --
     def run(self):
@@ -171,7 +264,7 @@ class SpaceGame:
             if total_time is None:
                 self.session_time_ms = None
             else:
-                # if user set minutes, settings may already be seconds; we'll accept seconds here
+                # settings.total_time is stored in seconds; convert to ms
                 self.session_time_ms = int(total_time * 1000)
             # time between questions (stored in settings as seconds OR milliseconds; accept string/int/float)
             tbq = getattr(self.settings, "time_between_questions", None)
@@ -215,11 +308,11 @@ class SpaceGame:
             self.muzzle_flash = True
 
         self.load_next_question()
-        # music
+        # music: prefer assets/Music or assets/music, then music folder, then literal path
         if self.music_enabled and getattr(self.settings, "music_choice", ""):
             mc = getattr(self.settings, "music_choice", "") or ""
-            # try preferred folders in order: assets/music, music, then literal path
             candidates = [
+                Path("assets") / "Music" / mc,
                 Path("assets") / "music" / mc,
                 Path("music") / mc,
                 Path(mc),
