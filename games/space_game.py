@@ -132,23 +132,11 @@ class SpaceGame:
     def load_sounds(self, folder=None):
         """Robustly load sound effects.
 
-        Looks for SFX in (in order):
-          - provided folder (if given)
-          - assets/Sound Effects
-          - assets/SoundEffects
-          - assets/Sound_Effects
-          - assets/sound effects
-          - assets
-          - project root
-
-        Populates:
-          - self.fire_snd
-          - self.hit_snd
-          - self.sfx_bank (dict of other found sounds keyed by file stem)
+        Looks for SFX in several candidate folders and fills fire_snd, hit_snd and sfx_bank.
         """
         exts = (".wav", ".ogg", ".mp3", ".flac")
 
-        # best-effort ensure mixer inited
+        # ensure mixer inited
         try:
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
@@ -161,7 +149,6 @@ class SpaceGame:
             except Exception:
                 return None
 
-        # candidate directories (preference order)
         cand_dirs = []
         if folder:
             try:
@@ -177,7 +164,6 @@ class SpaceGame:
             Path("."),
         ]
 
-        # helper to find a specific file by base name (try exact base+ext, then fuzzy match)
         def find_sound_file(base_name):
             # exact name try
             for d in cand_dirs:
@@ -196,14 +182,12 @@ class SpaceGame:
                         return p
             return None
 
-        # load named primary sounds
         fpath = find_sound_file("fire")
         self.fire_snd = try_load_sound(fpath) if fpath is not None else None
 
         hpath = find_sound_file("hit")
         self.hit_snd = try_load_sound(hpath) if hpath is not None else None
 
-        # populate sfx_bank by scanning preferred directories
         self.sfx_bank = {}
         scanned = set()
         for d in cand_dirs:
@@ -230,6 +214,37 @@ class SpaceGame:
                 if k in self.sfx_bank:
                     self.hit_snd = self.sfx_bank[k]
                     break
+
+    def start_music(self):
+        """Attempt to (re)start background music according to settings.music_choice."""
+        if not getattr(self, "music_enabled", False):
+            return False
+        mc = getattr(self.settings, "music_choice", "") or ""
+        if not mc:
+            return False
+        candidates = [
+            Path("assets") / "Music" / mc,
+            Path("assets") / "music" / mc,
+            Path("music") / mc,
+            Path(mc),
+        ]
+        for p in candidates:
+            if p.exists() and p.is_file():
+                try:
+                    pygame.mixer.music.load(str(p))
+                    pygame.mixer.music.play(-1)
+                    return True
+                except Exception:
+                    # try next candidate
+                    pass
+        return False
+
+    def stop_music(self):
+        """Stop background music playback (safe even if no music loaded)."""
+        try:
+            pygame.mixer.music.stop()
+        except Exception:
+            pass
 
     # -- main run method --
     def run(self):
@@ -271,7 +286,6 @@ class SpaceGame:
             if tbq is None:
                 self.time_between_questions_ms = None
             else:
-                # handle strings like "10", numbers like 10 (seconds), or already-milliseconds values
                 try:
                     if isinstance(tbq, str):
                         tbq_val = float(tbq)
@@ -280,7 +294,6 @@ class SpaceGame:
                 except Exception:
                     tbq_val = None
                 if tbq_val is None:
-                    # fallback: treat as seconds parsed from string digits
                     try:
                         tbq_val = float(
                             "".join([c for c in str(tbq) if (c.isdigit() or c == ".")])
@@ -290,11 +303,9 @@ class SpaceGame:
                 if tbq_val is None:
                     self.time_between_questions_ms = None
                 else:
-                    # Heuristic: if value looks large (>1000) assume it's already milliseconds
                     if tbq_val > 1000:
                         self.time_between_questions_ms = int(tbq_val)
                     else:
-                        # treat as seconds -> convert to ms
                         self.time_between_questions_ms = int(tbq_val * 1000)
             # sfx/music flags
             self.sfx_enabled = bool(getattr(self.settings, "sfx", True))
@@ -307,29 +318,20 @@ class SpaceGame:
             self.music_enabled = False
             self.muzzle_flash = True
 
+        # load sounds (call externally too if desired)
+        try:
+            # try loading from assets/Sound Effects by default
+            self.load_sounds()
+        except Exception:
+            pass
+
         self.load_next_question()
-        # music: prefer assets/Music or assets/music, then music folder, then literal path
-        if self.music_enabled and getattr(self.settings, "music_choice", ""):
-            mc = getattr(self.settings, "music_choice", "") or ""
-            candidates = [
-                Path("assets") / "Music" / mc,
-                Path("assets") / "music" / mc,
-                Path("music") / mc,
-                Path(mc),
-            ]
-            for p in candidates:
-                if p.exists() and p.is_file():
-                    try:
-                        pygame.mixer.music.load(str(p))
-                        pygame.mixer.music.play(-1)
-                    except Exception:
-                        # load failed for this file — try next candidate
-                        pass
-                    break
+
+        # music: start if enabled
+        if self.music_enabled:
+            self.start_music()
 
         # timers
-        # Note: DO NOT overwrite question_timer_ms here — load_next_question() already sets it when needed.
-        # Keep session timer reset, but preserve question_timer_ms so the first question countdown starts immediately.
         self.session_elapsed_ms = 0
 
         running = True
@@ -337,6 +339,8 @@ class SpaceGame:
             dt = clock.tick(60)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    # stop music and quit
+                    self.stop_music()
                     running = False
                     return "quit"
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -388,7 +392,9 @@ class SpaceGame:
                                         self.lives -= 1
                                     # check for game over only if lives are numeric
                                     if self.lives is not None and self.lives <= 0:
+                                        # stop music immediately on game over
                                         self.state = "game_over"
+                                        self.stop_music()
                                     else:
                                         self.load_next_question()
                                 break
@@ -402,8 +408,9 @@ class SpaceGame:
             ):
                 self.session_elapsed_ms += dt
                 if self.session_elapsed_ms >= self.session_time_ms:
-                    # session time up -> game over
+                    # session time up -> game over (stop music)
                     self.state = "game_over"
+                    self.stop_music()
 
             # update question timer (only when asking)
             if (
@@ -417,9 +424,10 @@ class SpaceGame:
                         self.lives -= 1
                     # advance question or end
                     if self.lives is not None and self.lives <= 0:
+                        # out of lives -> game over
                         self.state = "game_over"
+                        self.stop_music()
                     else:
-                        # when question_mode is 'one_each', running out of questions ends session - otherwise continue
                         qmode = (
                             getattr(self.settings, "question_mode", "loop")
                             if getattr(self, "settings", None)
@@ -429,6 +437,7 @@ class SpaceGame:
                             self.questions
                         ):
                             self.state = "game_over"
+                            self.stop_music()
                         else:
                             self.load_next_question()
 
@@ -627,12 +636,19 @@ class SpaceGame:
                     self.session_elapsed_ms = 0
                     self.load_next_question()
                     self.state = "asking"
+                    # restart music if enabled
+                    if self.music_enabled:
+                        self.start_music()
                 if keys[pygame.K_q]:
+                    # quit from game over: ensure music stopped then exit
+                    self.stop_music()
                     running = False
                     return "quit"
 
             pygame.display.flip()
 
+        # ensure music stopped when leaving run
+        self.stop_music()
         pygame.quit()
 
 
