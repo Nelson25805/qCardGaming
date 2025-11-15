@@ -1,12 +1,12 @@
 {
   "question_order": "top",
   "time_between_questions": null,
-  "total_time": null,
+  "total_time": 300,
   "lives": 5,
   "sfx": true,
   "music": true,
   "music_choice": "From Page to Practice.mp3",
-  "question_mode": "one_each",
+  "question_mode": "loop",
   "enemy_speed_multiplier": 0.75,
   "muzzle_flash": true
 }
