@@ -1,7 +1,11 @@
-"""
-games/space_game.py (patched)
-Shows additional HUD: remaining session time, per-question timer, and music status.
-"""
+# games/space_game.py (patched)
+# Shows additional HUD: remaining session time, per-question timer, and music status.
+# Improvements:
+#  - one_each mode: spawn waves sized to question count (up to 18 each).
+#  - enemies never go off-screen: finite session -> descent timed to session end;
+#    unlimited session -> wrap back up when near player.
+#  - spawn_enemies(count) added.
+#  - play final-question attack animation then show win screen.
 
 import pygame, random, math, sys
 from pathlib import Path
@@ -53,7 +57,6 @@ class SpaceGame:
         # pygame resources
         self.fire_snd = None
         self.hit_snd = None
-        # dictionary of other SFX found (keyed by stem -> pygame.mixer.Sound)
         self.sfx_bank = {}
 
         # timers
@@ -64,6 +67,17 @@ class SpaceGame:
         self.sfx_enabled = True
         self.music_enabled = False
         self.muzzle_flash = True
+
+        # enemy / wave config
+        self.enemies_per_wave = 18
+        # continuous descent speed (pixels per ms). computed after player exists.
+        self.enemy_descent_speed_px_per_ms = 0.0
+        # store initial Y layout top for wrapping purposes
+        self.enemy_initial_top = 50
+
+        # When True, the current correct-answer will finish the run only after the
+        # targeted enemy is destroyed (so we can play the firing/hit animation).
+        self.finish_after_hit = False
 
     # -- loading / setup --
     def load_questions(self):
@@ -87,19 +101,47 @@ class SpaceGame:
         self.player_group = pygame.sprite.Group(self.player)
         self.bullets = pygame.sprite.Group()
         self.enemies = pygame.sprite.Group()
-        self.spawn_enemies()
+        # spawn initial wave based on mode & question count
+        self.spawn_enemies_for_mode_initial()
 
-    def spawn_enemies(self):
+    def spawn_enemies(self, count=None):
+        """Spawn `count` enemies into rows/cols (cols=6). Each enemy gets attribute init_y to enable wrapping."""
+        if count is None:
+            count = self.enemies_per_wave
         self.enemies.empty()
-        total_w = 6 * 40 + (6 - 1) * 10
+        cols = 6
+        # compute rows needed
+        rows = (count + cols - 1) // cols
+        total_w = cols * 40 + (cols - 1) * 10
         start_x = (SCREEN_W - total_w) // 2
-        for row in range(3):
-            for col in range(6):
-                x = start_x + col * (40 + 10)
-                y = 50 + row * (30 + 10)
-                self.enemies.add(Enemy(x, y))
+        start_y = self.enemy_initial_top
+        placed = 0
+        for r in range(rows):
+            for c in range(cols):
+                if placed >= count:
+                    break
+                x = start_x + c * (40 + 10)
+                y = start_y + r * (30 + 10)
+                e = Enemy(x, y)
+                e.init_y = y
+                self.enemies.add(e)
+                placed += 1
+
+    def spawn_enemies_for_mode_initial(self):
+        """Choose initial spawn count based on settings."""
+        if getattr(self.settings, "question_mode", "loop") == "one_each":
+            total_questions = len(self.questions)
+            # question_index counts how many times load_next_question was already invoked.
+            # compute remaining by subtracting (question_index - 1) if load_next_question called before.
+            remaining = max(0, total_questions - max(0, self.question_index - 1))
+            spawn_count = min(self.enemies_per_wave, max(0, remaining))
+            if spawn_count > 0:
+                self.spawn_enemies(spawn_count)
+        else:
+            self.spawn_enemies(self.enemies_per_wave)
 
     # -- quiz helper --
+
     def load_next_question(self):
         if not self.questions:
             # no questions available — set safe defaults so UI can render and we don't crash
@@ -110,11 +152,32 @@ class SpaceGame:
             self.question_timer_ms = None
             return
 
+        # if we're at/after the end and question_mode is one_each, finish the run
         if self.question_index >= len(self.questions):
-            self.question_index = 0
-            random.shuffle(self.questions)
+            if getattr(self.settings, "question_mode", "loop") == "one_each":
+                # finished the set -> determine win/lose based on remaining lives
+                self.current_q = None
+                self.choices = []
+                self.correct_choice_index = -1
+                self.question_timer_ms = None
+                # If lives is None (unlimited) or still >0 then this is a win
+                if (self.lives is None) or (
+                    isinstance(self.lives, int) and self.lives > 0
+                ):
+                    self.state = "won"
+                else:
+                    self.state = "game_over"
+                return
+            else:
+                # loop mode -> reshuffle & reset index
+                self.question_index = 0
+                random.shuffle(self.questions)
+
+        # normal case: load the question at question_index
         self.current_q = self.questions[self.question_index]
+        # increment question index to indicate we've prepared this question (used for remaining calculations)
         self.question_index += 1
+
         distractors = quiz_loader.make_distractors(
             self.current_q["a"], self.answer_pool
         )
@@ -130,20 +193,11 @@ class SpaceGame:
 
     # -- sounds --
     def load_sounds(self, folder=None):
-        """Robustly load sound effects.
-
-        Looks for SFX in several candidate folders and fills fire_snd, hit_snd and sfx_bank.
-        """
+        base = Path(folder) if folder else Path(".")
+        # try to find fire/hit in a few candidate dirs
         exts = (".wav", ".ogg", ".mp3", ".flac")
 
-        # ensure mixer inited
-        try:
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
-        except Exception:
-            pass
-
-        def try_load_sound(path: Path):
+        def try_load(path):
             try:
                 return pygame.mixer.Sound(str(path))
             except Exception:
@@ -151,10 +205,7 @@ class SpaceGame:
 
         cand_dirs = []
         if folder:
-            try:
-                cand_dirs.append(Path(folder))
-            except Exception:
-                pass
+            cand_dirs.append(Path(folder))
         cand_dirs += [
             Path("assets") / "Sound Effects",
             Path("assets") / "SoundEffects",
@@ -164,59 +215,49 @@ class SpaceGame:
             Path("."),
         ]
 
-        def find_sound_file(base_name):
-            # exact name try
+        def find_file_by_stem(stem):
             for d in cand_dirs:
                 if not d.exists() or not d.is_dir():
                     continue
                 for ext in exts:
-                    p = d / f"{base_name}{ext}"
+                    p = d / f"{stem}{ext}"
                     if p.exists() and p.is_file():
                         return p
-            # fuzzy: pick first file whose stem contains the base_name
+            # fuzzy: any file containing stem in name
             for d in cand_dirs:
                 if not d.exists() or not d.is_dir():
                     continue
                 for p in sorted(d.iterdir()):
-                    if p.suffix.lower() in exts and base_name.lower() in p.stem.lower():
+                    if p.suffix.lower() in exts and stem.lower() in p.stem.lower():
                         return p
             return None
 
-        fpath = find_sound_file("fire")
-        self.fire_snd = try_load_sound(fpath) if fpath is not None else None
+        f = find_file_by_stem("fire")
+        self.fire_snd = try_load(f) if f else None
+        h = find_file_by_stem("hit")
+        self.hit_snd = try_load(h) if h else None
 
-        hpath = find_sound_file("hit")
-        self.hit_snd = try_load_sound(hpath) if hpath is not None else None
-
+        # populate sfx_bank
         self.sfx_bank = {}
-        scanned = set()
         for d in cand_dirs:
             if not d.exists() or not d.is_dir():
                 continue
             for p in sorted(d.iterdir()):
                 if p.suffix.lower() in exts and p.is_file():
-                    key = p.stem.lower()
-                    if key in scanned:
-                        continue
-                    scanned.add(key)
-                    snd = try_load_sound(p)
-                    if snd is not None:
-                        self.sfx_bank[key] = snd
+                    snd = try_load(p)
+                    if snd:
+                        self.sfx_bank[p.stem.lower()] = snd
 
-        # fallback mapping for primary sounds if not found directly
-        if self.fire_snd is None:
-            for k in ("fire", "shot", "shoot"):
-                if k in self.sfx_bank:
-                    self.fire_snd = self.sfx_bank[k]
-                    break
-        if self.hit_snd is None:
-            for k in ("hit", "explode", "impact"):
-                if k in self.sfx_bank:
-                    self.hit_snd = self.sfx_bank[k]
-                    break
+        # fallbacks
+        for k in ("shot", "shoot"):
+            if self.fire_snd is None and k in self.sfx_bank:
+                self.fire_snd = self.sfx_bank[k]
+        for k in ("explode", "impact"):
+            if self.hit_snd is None and k in self.sfx_bank:
+                self.hit_snd = self.sfx_bank[k]
 
+    # music helpers (kept from earlier)
     def start_music(self):
-        """Attempt to (re)start background music according to settings.music_choice."""
         if not getattr(self, "music_enabled", False):
             return False
         mc = getattr(self.settings, "music_choice", "") or ""
@@ -235,16 +276,32 @@ class SpaceGame:
                     pygame.mixer.music.play(-1)
                     return True
                 except Exception:
-                    # try next candidate
                     pass
         return False
 
     def stop_music(self):
-        """Stop background music playback (safe even if no music loaded)."""
         try:
             pygame.mixer.music.stop()
         except Exception:
             pass
+
+    # -- helper to clean up when run finishes --
+    def _cleanup_after_finish(self):
+        """Stop audio/timers/bullets when the run finishes (won or game_over)."""
+        # stop music
+        self.stop_music()
+        # clear bullets so no stray bullets keep states changing
+        try:
+            if self.bullets:
+                for b in list(self.bullets):
+                    b.kill()
+        except Exception:
+            pass
+        self.pending_target = None
+        # stop question timer
+        self.question_timer_ms = None
+        # reset finish flag
+        self.finish_after_hit = False
 
     # -- main run method --
     def run(self):
@@ -259,9 +316,15 @@ class SpaceGame:
         bigfont = pygame.font.Font(self.font_name, 28)
         smallfont = pygame.font.Font(self.font_name, 14)
 
-        # load questions and setup sprites
+        # load questions
         self.load_questions()
+
+        # prepare the first question BEFORE spawning so spawn logic can base on question counts
+        self.load_next_question()
+
+        # setup sprites & enemies (spawn initial wave respecting mode)
         self.setup_pygame_objects()
+
         # apply settings defaults: lives, music, sfx, enemy speed multiplier, timers
         if self.settings is not None:
             if getattr(self.settings, "lives", None) is None:
@@ -270,7 +333,7 @@ class SpaceGame:
             else:
                 self.lives = int(self.settings.lives)
             self.initial_lives = self.lives
-            # enemy speed multiplier
+            # enemy speed multiplier (horizontal speed)
             self.enemy_speed = self.enemy_speed * float(
                 getattr(self.settings, "enemy_speed_multiplier", 1.0)
             )
@@ -279,21 +342,16 @@ class SpaceGame:
             if total_time is None:
                 self.session_time_ms = None
             else:
-                # settings.total_time is stored in seconds; convert to ms
+                # settings.total_time stored in seconds; convert to ms
                 self.session_time_ms = int(total_time * 1000)
-            # time between questions (stored in settings as seconds OR milliseconds; accept string/int/float)
+            # time between questions (stored in settings as seconds)
             tbq = getattr(self.settings, "time_between_questions", None)
             if tbq is None:
                 self.time_between_questions_ms = None
             else:
                 try:
-                    if isinstance(tbq, str):
-                        tbq_val = float(tbq)
-                    else:
-                        tbq_val = float(tbq)
+                    tbq_val = float(tbq)
                 except Exception:
-                    tbq_val = None
-                if tbq_val is None:
                     try:
                         tbq_val = float(
                             "".join([c for c in str(tbq) if (c.isdigit() or c == ".")])
@@ -318,16 +376,36 @@ class SpaceGame:
             self.music_enabled = False
             self.muzzle_flash = True
 
-        # load sounds (call externally too if desired)
+        # load sounds (try assets folder)
         try:
-            # try loading from assets/Sound Effects by default
-            self.load_sounds()
+            self.load_sounds(Path("assets") / "Sound Effects")
         except Exception:
-            pass
+            try:
+                self.load_sounds("assets")
+            except:
+                pass
 
-        self.load_next_question()
+        # compute enemy vertical descent speed:
+        # If session_time_ms is finite, calculate a per-ms speed so enemies reach player's top at session end.
+        # Use the topmost enemy init Y as a baseline.
+        if (
+            self.session_time_ms is not None
+            and self.session_time_ms > 0
+            and self.player is not None
+        ):
+            # determine top of enemies (use configured enemy_initial_top)
+            top_y = self.enemy_initial_top
+            player_target_y = max(0, self.player.rect.top)
+            descent_needed = max(0, player_target_y - top_y - 8)  # small margin
+            # pixels per ms
+            self.enemy_descent_speed_px_per_ms = descent_needed / float(
+                self.session_time_ms
+            )
+        else:
+            # unlimited -> no gradual downward progress (we will wrap instead)
+            self.enemy_descent_speed_px_per_ms = 0.0
 
-        # music: start if enabled
+        # start music if enabled
         if self.music_enabled:
             self.start_music()
 
@@ -336,7 +414,8 @@ class SpaceGame:
 
         running = True
         while running:
-            dt = clock.tick(60)
+            dt = clock.tick(60)  # dt in ms
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     # stop music and quit
@@ -344,13 +423,16 @@ class SpaceGame:
                     running = False
                     return "quit"
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    if self.state == "asking":
+                    # only allow clicks when in asking state and there's an active question
+                    if self.state == "asking" and self.current_q:
                         mx, my = event.pos
                         rects = utils.choice_rects(SCREEN_W, SCREEN_H)
                         for i, r in enumerate(rects[: len(self.choices)]):
                             if r.collidepoint(mx, my):
                                 if i == self.correct_choice_index:
+                                    # correct answer
                                     if len(self.enemies.sprites()) > 0:
+                                        # create bullet that targets an enemy
                                         target = min(
                                             self.enemies.sprites(),
                                             key=lambda e: abs(
@@ -374,43 +456,70 @@ class SpaceGame:
                                         self.bullets.add(b)
                                         self.pending_target = target
                                         self.muzzle_timer = 160
-                                        self.state = "playing"
-                                        if self.fire_snd and self.sfx_enabled:
-                                            try:
-                                                self.fire_snd.play()
-                                            except:
-                                                pass
+
+                                        # If this is the last question in one_each mode, we want to play the
+                                        # animation first and then show the win screen. Detect that case:
+                                        last_q_and_one_each = getattr(
+                                            self.settings, "question_mode", "loop"
+                                        ) == "one_each" and self.question_index >= len(
+                                            self.questions
+                                        )
+
+                                        if last_q_and_one_each:
+                                            # mark that we should finish after the hit occurs
+                                            self.finish_after_hit = True
+                                            # DO NOT call load_next_question() now — wait for hit
+                                            # keep state as "playing" to allow bullet animation
+                                            self.state = "playing"
+                                            if self.fire_snd and self.sfx_enabled:
+                                                try:
+                                                    self.fire_snd.play()
+                                                except:
+                                                    pass
+                                        else:
+                                            # normal behavior: advance question now (so UI updates immediately)
+                                            self.load_next_question()
+                                            # If loading next question finished the run, cleanup; otherwise go to playing
+                                            if self.state in ("won", "game_over"):
+                                                self._cleanup_after_finish()
+                                            else:
+                                                self.state = "playing"
+                                                if self.fire_snd and self.sfx_enabled:
+                                                    try:
+                                                        self.fire_snd.play()
+                                                    except:
+                                                        pass
                                     else:
+                                        # no enemies (edge-case) -> give points and advance question
                                         self.score += 100
-                                        if len(self.enemies) == 0:
-                                            self.spawn_enemies()
                                         self.load_next_question()
-                                        self.state = "asking"
+                                        if self.state not in ("won", "game_over"):
+                                            self.state = "asking"
+                                        else:
+                                            self._cleanup_after_finish()
                                 else:
-                                    # decrement only when lives are finite (not None)
+                                    # incorrect -> decrement only when lives are finite (not None)
                                     if self.lives is not None:
                                         self.lives -= 1
                                     # check for game over only if lives are numeric
                                     if self.lives is not None and self.lives <= 0:
-                                        # stop music immediately on game over
                                         self.state = "game_over"
-                                        self.stop_music()
+                                        self._cleanup_after_finish()
                                     else:
                                         self.load_next_question()
                                 break
 
             keys = pygame.key.get_pressed()
 
-            # update session timer
-            if (
-                getattr(self, "session_time_ms", None) is not None
-                and self.state != "game_over"
-            ):
+            # update session timer (only when not in game_over or won)
+            if getattr(
+                self, "session_time_ms", None
+            ) is not None and self.state not in ("game_over", "won"):
                 self.session_elapsed_ms += dt
                 if self.session_elapsed_ms >= self.session_time_ms:
-                    # session time up -> game over (stop music)
+                    # session time up -> game over
                     self.state = "game_over"
-                    self.stop_music()
+                    self._cleanup_after_finish()
 
             # update question timer (only when asking)
             if (
@@ -424,9 +533,8 @@ class SpaceGame:
                         self.lives -= 1
                     # advance question or end
                     if self.lives is not None and self.lives <= 0:
-                        # out of lives -> game over
                         self.state = "game_over"
-                        self.stop_music()
+                        self._cleanup_after_finish()
                     else:
                         qmode = (
                             getattr(self.settings, "question_mode", "loop")
@@ -436,21 +544,31 @@ class SpaceGame:
                         if qmode == "one_each" and self.question_index >= len(
                             self.questions
                         ):
-                            self.state = "game_over"
-                            self.stop_music()
+                            # finished the set due to hitting time on the last question
+                            # decide win/lose based on remaining lives
+                            if (self.lives is None) or (
+                                isinstance(self.lives, int) and self.lives > 0
+                            ):
+                                self.state = "won"
+                            else:
+                                self.state = "game_over"
+                            self._cleanup_after_finish()
                         else:
                             self.load_next_question()
 
+            # ---------- game updates ----------
             if self.state == "playing":
                 self.player.update(keys)
                 self.bullets.update()
                 self.enemies.update()
 
+                # apply horizontal movement
                 if self.pending_target is None:
                     move_x = self.enemy_dir * self.enemy_speed * dt
                     for e in self.enemies:
                         e.rect.x += move_x
 
+                # bounce horizontally and small drop on bounce (kept)
                 if self.enemies and self.pending_target is None:
                     leftmost = min(e.rect.left for e in self.enemies)
                     rightmost = max(e.rect.right for e in self.enemies)
@@ -459,6 +577,30 @@ class SpaceGame:
                         for e in self.enemies:
                             e.rect.y += 10
 
+                # apply continuous descent if computed
+                if abs(self.enemy_descent_speed_px_per_ms) > 0.0:
+                    for e in self.enemies:
+                        e.rect.y += self.enemy_descent_speed_px_per_ms * dt
+
+                # check wrap/arrival logic
+                reached_player = False
+                for e in self.enemies:
+                    if e.rect.bottom >= self.player.rect.top:
+                        reached_player = True
+                        break
+
+                if reached_player:
+                    # finite session -> game over (they reached player)
+                    if self.session_time_ms is not None:
+                        self.state = "game_over"
+                        self._cleanup_after_finish()
+                    else:
+                        # unlimited -> wrap back to initial y positions
+                        for e in self.enemies:
+                            if hasattr(e, "init_y"):
+                                e.rect.y = e.init_y
+
+                # collisions
                 hits = pygame.sprite.groupcollide(
                     self.enemies, self.bullets, True, True
                 )
@@ -471,11 +613,56 @@ class SpaceGame:
                             pass
                     if self.pending_target is not None:
                         self.pending_target = None
-                    if len(self.enemies) == 0:
-                        self.spawn_enemies()
-                    self.load_next_question()
 
-                # forced hit via proximity
+                    # If we were waiting to finish after this hit (final-question correct),
+                    # then advance the question/run now (this causes state = 'won' typically).
+                    if self.finish_after_hit:
+                        # loading next question will detect end and set state to 'won'
+                        self.load_next_question()
+                        # cleanup/stop music if finished
+                        if self.state in ("won", "game_over"):
+                            self._cleanup_after_finish()
+                        self.finish_after_hit = False
+                        # do NOT spawn more waves if finished; otherwise spawn as usual below
+
+                    # when all enemies in current wave are cleared:
+                    if len(self.enemies) == 0:
+                        # FIRST prepare next question (this may set state to "won" or "game_over")
+                        # Note: if finish_after_hit was True above, question advancement already happened.
+                        if not self.finish_after_hit:
+                            self.load_next_question()
+
+                        # If the run finished (win/lose) don't spawn a new wave
+                        if self.state in ("game_over", "won"):
+                            # cleanup and stop music
+                            self._cleanup_after_finish()
+                            # don't spawn new wave
+                        else:
+                            # then spawn next wave if appropriate
+                            if (
+                                getattr(self.settings, "question_mode", "loop")
+                                == "one_each"
+                            ):
+                                total_questions = len(self.questions)
+                                # remaining questions = total - (question_index - 1)
+                                remaining = max(
+                                    0, total_questions - max(0, self.question_index - 1)
+                                )
+                                if remaining > 0:
+                                    self.spawn_enemies(
+                                        min(self.enemies_per_wave, remaining)
+                                    )
+                            else:
+                                # loop mode: always spawn standard wave
+                                self.spawn_enemies(self.enemies_per_wave)
+
+                        # after handling wave spawn/load question, continue
+                        if len(self.enemies) == 0:
+                            # If load_next_question ended the game (one_each done), don't change state
+                            if self.state not in ("game_over", "won"):
+                                self.state = "asking"
+
+                # forced hit via proximity (targeted bullet)
                 if self.pending_target is not None:
                     for b in list(self.bullets):
                         if getattr(b, "target", None) is self.pending_target:
@@ -503,18 +690,45 @@ class SpaceGame:
                                     except:
                                         pass
                                 self.pending_target = None
-                                if len(self.enemies) == 0:
-                                    self.spawn_enemies()
-                                self.load_next_question()
+
+                                # If we were waiting to finish after this hit (final-question correct),
+                                # then advance the question/run now (this causes state = 'won' typically).
+                                if self.finish_after_hit:
+                                    self.load_next_question()
+                                    if self.state in ("won", "game_over"):
+                                        self._cleanup_after_finish()
+                                    self.finish_after_hit = False
+
+                                # spawn next wave if appropriate (unless finished)
+                                if self.state not in ("game_over", "won"):
+                                    if (
+                                        getattr(self.settings, "question_mode", "loop")
+                                        == "one_each"
+                                    ):
+                                        total_questions = len(self.questions)
+                                        remaining = max(
+                                            0,
+                                            total_questions
+                                            - max(0, self.question_index - 1),
+                                        )
+                                        if remaining > 0:
+                                            self.spawn_enemies(
+                                                min(self.enemies_per_wave, remaining)
+                                            )
+                                    else:
+                                        self.spawn_enemies(self.enemies_per_wave)
+                                # go back to asking if not game over/won
+                                if self.state not in ("game_over", "won"):
+                                    self.state = "asking"
                                 break
 
-                if len(self.bullets) == 0:
+                if len(self.bullets) == 0 and self.state not in ("game_over", "won"):
                     self.state = "asking"
 
             elif self.state == "asking":
                 self.player.update(keys)
                 self.bullets.update()
-                self.enemies.update()
+                # small horizontal movement while asking
                 move_x = self.enemy_dir * self.enemy_speed * dt * 0.2
                 for e in self.enemies:
                     e.rect.x += move_x
@@ -525,8 +739,24 @@ class SpaceGame:
                         self.enemy_dir *= -1
                         for e in self.enemies:
                             e.rect.y += 5
+                # continuous descent while asking as well
+                if abs(self.enemy_descent_speed_px_per_ms) > 0.0:
+                    for e in self.enemies:
+                        e.rect.y += self.enemy_descent_speed_px_per_ms * dt
+                # wrap or detect arrival as in playing
+                reached_player = any(
+                    e.rect.bottom >= self.player.rect.top for e in self.enemies
+                )
+                if reached_player:
+                    if self.session_time_ms is not None:
+                        self.state = "game_over"
+                        self._cleanup_after_finish()
+                    else:
+                        for e in self.enemies:
+                            if hasattr(e, "init_y"):
+                                e.rect.y = e.init_y
 
-            # draw
+            # ---------- drawing ----------
             screen.fill((20, 20, 40))
             self.enemies.draw(screen)
             self.bullets.draw(screen)
@@ -577,7 +807,6 @@ class SpaceGame:
             right1 = smallfont.render(session_str, True, (200, 200, 255))
             right2 = smallfont.render(qstr, True, (200, 200, 255))
             right3 = smallfont.render(music_label, True, (200, 200, 255))
-            # right-align them
             screen.blit(right1, (sx - right1.get_width(), 8))
             screen.blit(right2, (sx - right2.get_width(), 8 + right1.get_height() + 2))
             screen.blit(
@@ -612,17 +841,32 @@ class SpaceGame:
                         )
                         ty += font.get_height() + 2
 
-            elif self.state == "game_over":
-                go = bigfont.render("GAME OVER", True, (255, 50, 50))
+            elif self.state in ("game_over", "won"):
+                # show different headline for win vs loss
+                if self.state == "won":
+                    headline = bigfont.render("YOU WIN!", True, (80, 220, 120))
+                else:
+                    headline = bigfont.render("GAME OVER", True, (255, 50, 50))
+
                 screen.blit(
-                    go, (SCREEN_W // 2 - go.get_width() // 2, SCREEN_H // 2 - 40)
+                    headline,
+                    (SCREEN_W // 2 - headline.get_width() // 2, SCREEN_H // 2 - 40),
                 )
+
+                # optional details: show score / progress (you can customize)
+                details = font.render(f"Score: {self.score}", True, (200, 200, 200))
+                screen.blit(
+                    details, (SCREEN_W // 2 - details.get_width() // 2, SCREEN_H // 2)
+                )
+
                 hint = font.render(
                     "Press R to restart or Q to quit.", True, (255, 255, 255)
                 )
                 screen.blit(
-                    hint, (SCREEN_W // 2 - hint.get_width() // 2, SCREEN_H // 2 + 10)
+                    hint, (SCREEN_W // 2 - hint.get_width() // 2, SCREEN_H // 2 + 30)
                 )
+
+                # Restart / quit handling
                 keys = pygame.key.get_pressed()
                 if keys[pygame.K_r]:
                     # restart using settings defaults
@@ -632,15 +876,27 @@ class SpaceGame:
                         self.lives = int(getattr(self.settings, "lives", 3))
                     self.initial_lives = self.lives
                     self.score = 0
-                    self.spawn_enemies()
-                    self.session_elapsed_ms = 0
+
+                    # reload questions and reset indices
+                    self.load_questions()
+                    self.question_index = 0
                     self.load_next_question()
+
+                    # respawn enemies appropriate for mode
+                    self.setup_pygame_objects()
+
+                    # reset timers
+                    self.session_elapsed_ms = 0
+
+                    # go back to asking
                     self.state = "asking"
-                    # restart music if enabled
+
+                    # restart music if enabled in settings
                     if self.music_enabled:
                         self.start_music()
+
                 if keys[pygame.K_q]:
-                    # quit from game over: ensure music stopped then exit
+                    # quit from win/lose: ensure music stopped then exit
                     self.stop_music()
                     running = False
                     return "quit"
@@ -701,3 +957,4 @@ class Enemy(pygame.sprite.Sprite):
         self.image = pygame.Surface((40, 30))
         self.image.fill((200, 50, 50))
         self.rect = self.image.get_rect(topleft=(x, y))
+        self.init_y = y
