@@ -1,12 +1,3 @@
-# games/space_game.py (patched)
-# Shows additional HUD: remaining session time, per-question timer, and music status.
-# Improvements:
-#  - one_each mode: spawn waves sized to question count (up to 18 each).
-#  - enemies never go off-screen: finite session -> descent timed to session end;
-#    unlimited session -> wrap back up when near player.
-#  - spawn_enemies(count) added.
-#  - play final-question attack animation then show win screen.
-
 import pygame, random, math, sys
 from pathlib import Path
 import quiz_loader
