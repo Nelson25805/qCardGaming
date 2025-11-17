@@ -50,6 +50,9 @@ class SpaceGame:
         self.hit_snd = None
         self.sfx_bank = {}
 
+        # graphics storage (surfaces) - populated by load_graphics()
+        self.graphics = {"invaders": [], "player": None, "bullet": None}
+
         # timers
         self.question_timer_ms = None
         self.session_time_ms = None
@@ -87,8 +90,10 @@ class SpaceGame:
             random.shuffle(self.questions)
 
     def setup_pygame_objects(self):
-        # Sprites
-        self.player = Player(SCREEN_W // 2, SCREEN_H - 40)
+        # Sprites; pass loaded graphics if available
+        self.player = Player(
+            SCREEN_W // 2, SCREEN_H - 40, image=self.graphics.get("player")
+        )
         self.player_group = pygame.sprite.Group(self.player)
         self.bullets = pygame.sprite.Group()
         self.enemies = pygame.sprite.Group()
@@ -107,13 +112,17 @@ class SpaceGame:
         start_x = (SCREEN_W - total_w) // 2
         start_y = self.enemy_initial_top
         placed = 0
+        inv_images = self.graphics.get("invaders", []) or []
         for r in range(rows):
             for c in range(cols):
                 if placed >= count:
                     break
                 x = start_x + c * (40 + 10)
                 y = start_y + r * (30 + 10)
-                e = Enemy(x, y)
+                img = None
+                if inv_images:
+                    img = random.choice(inv_images)
+                e = Enemy(x, y, image=img)
                 e.init_y = y
                 self.enemies.add(e)
                 placed += 1
@@ -128,11 +137,12 @@ class SpaceGame:
             spawn_count = min(self.enemies_per_wave, max(0, remaining))
             if spawn_count > 0:
                 self.spawn_enemies(spawn_count)
+            else:
+                self.enemies.empty()
         else:
             self.spawn_enemies(self.enemies_per_wave)
 
     # -- quiz helper --
-
     def load_next_question(self):
         if not self.questions:
             # no questions available — set safe defaults so UI can render and we don't crash
@@ -247,6 +257,51 @@ class SpaceGame:
             if self.hit_snd is None and k in self.sfx_bank:
                 self.hit_snd = self.sfx_bank[k]
 
+    # -- graphics loading --
+    def load_graphics(self, folder=None):
+        """
+        Attempts to load images from an assets Graphics folder.
+        Looks for invader_*.png, player_ship.png, bullet.png (case-insensitive stems).
+        Must be called after pygame.init() so surfaces can be created.
+        """
+        candidates = []
+        if folder:
+            candidates.append(Path(folder))
+        candidates += [
+            Path("assets") / "Graphics",
+            Path("assets") / "graphics",
+            Path("assets"),
+            Path("."),
+        ]
+        exts = [".png", ".bmp", ".gif", ".jpg", ".jpeg", ".webp"]
+        inv_images = []
+        player_img = None
+        bullet_img = None
+
+        for d in candidates:
+            if not d.exists() or not d.is_dir():
+                continue
+            for p in sorted(d.iterdir()):
+                if p.suffix.lower() not in exts:
+                    continue
+                name = p.stem.lower()
+                try:
+                    surf = pygame.image.load(str(p)).convert_alpha()
+                except Exception:
+                    continue
+                if "invader" in name or "alien" in name or "enemy" in name:
+                    inv_images.append(surf)
+                elif "player" in name or "ship" in name:
+                    if player_img is None:
+                        player_img = surf
+                elif "bullet" in name or "shot" in name or "projectile" in name:
+                    if bullet_img is None:
+                        bullet_img = surf
+
+        self.graphics["invaders"] = inv_images
+        self.graphics["player"] = player_img
+        self.graphics["bullet"] = bullet_img
+
     # music helpers (kept from earlier)
     def start_music(self):
         if not getattr(self, "music_enabled", False):
@@ -312,6 +367,15 @@ class SpaceGame:
 
         # prepare the first question BEFORE spawning so spawn logic can base on question counts
         self.load_next_question()
+
+        # load graphics now (after pygame.init()) so sprites can use them
+        try:
+            self.load_graphics(Path("assets") / "Graphics")
+        except Exception:
+            try:
+                self.load_graphics("assets")
+            except:
+                pass
 
         # setup sprites & enemies (spawn initial wave respecting mode)
         self.setup_pygame_objects()
@@ -442,7 +506,13 @@ class SpaceGame:
                                         else:
                                             vx = (dx / dist) * BULLET_SPEED_MAG
                                             vy = (dy / dist) * BULLET_SPEED_MAG
-                                        b = Bullet(start_x, start_y, vx=vx, vy=vy)
+                                        b = Bullet(
+                                            start_x,
+                                            start_y,
+                                            vx=vx,
+                                            vy=vy,
+                                            image=self.graphics.get("bullet"),
+                                        )
                                         b.target = target
                                         self.bullets.add(b)
                                         self.pending_target = target
@@ -901,10 +971,24 @@ class SpaceGame:
 
 # --- Sprite classes used by the SpaceGame ---
 class Player(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, image=None):
         super().__init__()
-        self.image = pygame.Surface((50, 20), pygame.SRCALPHA)
-        pygame.draw.rect(self.image, (50, 200, 50), (0, 0, 50, 20), border_radius=4)
+        if image is not None:
+            try:
+                surf = image
+                max_w = 72
+                if surf.get_width() > max_w:
+                    h = int(surf.get_height() * (max_w / surf.get_width()))
+                    surf = pygame.transform.smoothscale(surf, (max_w, h))
+                self.image = surf.convert_alpha()
+            except Exception:
+                self.image = pygame.Surface((50, 20), pygame.SRCALPHA)
+                pygame.draw.rect(
+                    self.image, (50, 200, 50), (0, 0, 50, 20), border_radius=4
+                )
+        else:
+            self.image = pygame.Surface((50, 20), pygame.SRCALPHA)
+            pygame.draw.rect(self.image, (50, 200, 50), (0, 0, 50, 20), border_radius=4)
         self.rect = self.image.get_rect(center=(x, y))
         self.speed = 6
 
@@ -917,10 +1001,20 @@ class Player(pygame.sprite.Sprite):
 
 
 class Bullet(pygame.sprite.Sprite):
-    def __init__(self, x, y, vx=0.0, vy=0.0):
+    def __init__(self, x, y, vx=0.0, vy=0.0, image=None):
         super().__init__()
-        self.image = pygame.Surface((6, 12), pygame.SRCALPHA)
-        pygame.draw.rect(self.image, (255, 255, 0), (0, 0, 6, 12))
+        if image is not None:
+            try:
+                surf = image
+                if surf.get_width() > 16:
+                    surf = pygame.transform.smoothscale(surf, (10, 18))
+                self.image = surf.convert_alpha()
+            except Exception:
+                self.image = pygame.Surface((6, 12), pygame.SRCALPHA)
+                pygame.draw.rect(self.image, (255, 255, 0), (0, 0, 6, 12))
+        else:
+            self.image = pygame.Surface((6, 12), pygame.SRCALPHA)
+            pygame.draw.rect(self.image, (255, 255, 0), (0, 0, 6, 12))
         self.rect = self.image.get_rect(center=(x, y))
         self.posx = float(self.rect.centerx)
         self.posy = float(self.rect.centery)
@@ -943,9 +1037,21 @@ class Bullet(pygame.sprite.Sprite):
 
 
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, image=None):
         super().__init__()
-        self.image = pygame.Surface((40, 30))
-        self.image.fill((200, 50, 50))
+        if image is not None:
+            try:
+                surf = image
+                max_w = 40
+                if surf.get_width() != max_w:
+                    h = int(surf.get_height() * (max_w / surf.get_width()))
+                    surf = pygame.transform.smoothscale(surf, (max_w, h))
+                self.image = surf.convert_alpha()
+            except Exception:
+                self.image = pygame.Surface((40, 30))
+                self.image.fill((200, 50, 50))
+        else:
+            self.image = pygame.Surface((40, 30))
+            self.image.fill((200, 50, 50))
         self.rect = self.image.get_rect(topleft=(x, y))
         self.init_y = y
