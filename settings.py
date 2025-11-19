@@ -89,17 +89,46 @@ def run_settings_screen(screen, settings: Settings):
             return default
 
     def find_music_files():
-        """Search assets/music, music, then current folder for audio files and return unique filenames."""
         exts = (".mp3", ".ogg", ".wav", ".flac")
         candidates = []
-        search_dirs = [Path("assets") / "music", Path("music"), Path(".")]
-        for d in search_dirs:
+        seen = set()
+
+        # Look in every game's assets/music folders
+        games_dir = Path("games")
+        if games_dir.exists() and games_dir.is_dir():
+            for gd in sorted(games_dir.iterdir()):
+                if not gd.is_dir():
+                    continue
+                pkg_music_dirs = [
+                    gd / "assets" / "music",
+                    gd / "assets" / "Music",
+                    gd / "assets",
+                ]
+                for md in pkg_music_dirs:
+                    if md.exists() and md.is_dir():
+                        for p in sorted(md.iterdir()):
+                            if p.suffix.lower() in exts and p.is_file():
+                                name = p.name
+                                if name not in seen:
+                                    candidates.append(name)
+                                    seen.add(name)
+
+        # Then top-level music folders
+        top_dirs = [
+            Path("assets") / "music",
+            Path("assets") / "Music",
+            Path("music"),
+            Path("."),
+        ]
+        for d in top_dirs:
             if d.exists() and d.is_dir():
                 for p in sorted(d.iterdir()):
-                    if p.suffix.lower() in exts:
+                    if p.suffix.lower() in exts and p.is_file():
                         name = p.name
-                        if name not in candidates:
+                        if name not in seen:
                             candidates.append(name)
+                            seen.add(name)
+
         return candidates
 
     def secs_to_display(secs):
