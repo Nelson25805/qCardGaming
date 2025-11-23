@@ -57,10 +57,17 @@ class Settings:
 # ---------------------------------------------------------------------
 # Settings screen UI function (keeps main.py clean)
 # ---------------------------------------------------------------------
-def run_settings_screen(screen, settings: Settings):
+def run_settings_screen(screen, settings: Settings, current_game: str = None):
     """
     Opens an interactive settings UI using pygame.
-    Accepts a pygame Surface (screen) and a Settings instance.
+    Accepts a pygame Surface (screen), a Settings instance, and an optional
+    `current_game` string which should be the folder name under `games/` for
+    the currently-selected game (e.g. 'space_game' or 'cowboy_shooter').
+
+    When `current_game` is provided the Music file chooser lists ONLY files
+    from games/<current_game>/assets/Music (and .../assets/music). If
+    current_game is None, it falls back to top-level assets/music, music, and the
+    current folder (legacy behaviour).
     Returns "ok" (closed normally) or "quit" (user requested quit).
     """
     pygame.font.init()
@@ -88,39 +95,49 @@ def run_settings_screen(screen, settings: Settings):
         except Exception:
             return default
 
-    def find_music_files():
+    def find_music_files_for_game(game_folder_name: str):
+        """
+        Return a list of music filenames that belong to a specific game.
+        Searches in:
+          games/<game_folder_name>/assets/Music
+          games/<game_folder_name>/assets/music
+          games/<game_folder_name>/assets
+        Only returns basenames (no paths). If nothing found, returns empty list.
+        """
         exts = (".mp3", ".ogg", ".wav", ".flac")
         candidates = []
         seen = set()
+        if not game_folder_name:
+            return []
 
-        # Look in every game's assets/music folders
-        games_dir = Path("games")
-        if games_dir.exists() and games_dir.is_dir():
-            for gd in sorted(games_dir.iterdir()):
-                if not gd.is_dir():
-                    continue
-                pkg_music_dirs = [
-                    gd / "assets" / "music",
-                    gd / "assets" / "Music",
-                    gd / "assets",
-                ]
-                for md in pkg_music_dirs:
-                    if md.exists() and md.is_dir():
-                        for p in sorted(md.iterdir()):
-                            if p.suffix.lower() in exts and p.is_file():
-                                name = p.name
-                                if name not in seen:
-                                    candidates.append(name)
-                                    seen.add(name)
+        gd = Path("games") / game_folder_name / "assets"
+        if gd.exists() and gd.is_dir():
+            # check typical music dirs in package-local assets
+            for md in (gd / "Music", gd / "music", gd):
+                if md.exists() and md.is_dir():
+                    for p in sorted(md.iterdir()):
+                        if p.suffix.lower() in exts and p.is_file():
+                            name = p.name
+                            if name not in seen:
+                                candidates.append(name)
+                                seen.add(name)
+        return candidates
 
-        # Then top-level music folders
-        top_dirs = [
+    def find_music_files_global():
+        """
+        Legacy/global fallback: look in top-level assets/music, music, and current folder.
+        Returns unique basenames ordered by preference.
+        """
+        exts = (".mp3", ".ogg", ".wav", ".flac")
+        candidates = []
+        seen = set()
+        search_dirs = [
             Path("assets") / "music",
             Path("assets") / "Music",
             Path("music"),
             Path("."),
         ]
-        for d in top_dirs:
+        for d in search_dirs:
             if d.exists() and d.is_dir():
                 for p in sorted(d.iterdir()):
                     if p.suffix.lower() in exts and p.is_file():
@@ -128,8 +145,21 @@ def run_settings_screen(screen, settings: Settings):
                         if name not in seen:
                             candidates.append(name)
                             seen.add(name)
-
         return candidates
+
+    def find_music_files():
+        """
+        If current_game provided: return that game's music only.
+        Otherwise return global/top-level music files.
+        """
+        if current_game:
+            files = find_music_files_for_game(current_game)
+            # If no files exist for the chosen game, fall back to the global list (useful while developing)
+            if files:
+                return files
+            return find_music_files_global()
+        else:
+            return find_music_files_global()
 
     def secs_to_display(secs):
         if secs is None:
@@ -210,7 +240,7 @@ def run_settings_screen(screen, settings: Settings):
         lives_unlimited = False
         lives_digits = str(int(settings.lives))
 
-        # gather available music files
+    # gather available music files - now based on current_game
     music_files = find_music_files()
     music_choices = ["None"] + music_files
     current_music_label = (
