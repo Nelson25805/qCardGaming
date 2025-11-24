@@ -1,10 +1,6 @@
-"""
-main.py - modular launcher with main menu and settings screen
-"""
-
-import pygame, sys, os
+# main.py - modular launcher with game chooser and settings aware of selected game
+import pygame, sys, os, importlib
 from pathlib import Path
-from games.space_game import SpaceGame
 import utils
 from settings import Settings, run_settings_screen
 
@@ -15,20 +11,29 @@ def list_csv_files(folder):
     return sorted([p.name for p in Path(folder).glob("*.csv")])
 
 
-def find_music_files():
-    """Return music filenames found in assets/music, music, then the current folder.
-    Filenames are unique and returned in order of preference (assets/music first)."""
-    exts = (".mp3", ".ogg", ".wav", ".flac")
-    candidates = []
-    search_dirs = [Path("assets") / "music", Path("music"), Path(".")]
-    for d in search_dirs:
-        if d.exists() and d.is_dir():
-            for p in sorted(d.iterdir()):
-                if p.suffix.lower() in exts:
-                    name = p.name
-                    if name not in candidates:
-                        candidates.append(name)
-    return candidates
+def discover_games():
+    games = []
+    gd = Path("games")
+    if not gd.exists() or not gd.is_dir():
+        return games
+    for d in sorted(gd.iterdir()):
+        if not d.is_dir() or d.name.startswith("__"):
+            continue
+        pkg = f"games.{d.name}"
+        try:
+            mod = importlib.import_module(pkg)
+        except Exception:
+            continue
+        cls = getattr(mod, "Game", None)
+        if cls is None:
+            for name in dir(mod):
+                if name.endswith("Game"):
+                    cls = getattr(mod, name)
+                    break
+        if cls is not None:
+            label = d.name.replace("_", " ").title()
+            games.append((d.name, label, cls))
+    return games
 
 
 def run_menu():
@@ -41,6 +46,10 @@ def run_menu():
 
     # load or create settings
     settings = Settings.load()
+
+    # discover games
+    games = discover_games()
+    game_idx = 0 if games else -1
 
     # default question file (try questions.csv)
     selected_csv = None
@@ -62,14 +71,25 @@ def run_menu():
                 file_rect = utils.button_rect(400, 260, w=360, h=50)
                 settings_rect = utils.button_rect(400, 350, w=360, h=50)
                 quit_rect = utils.button_rect(400, 450, w=200, h=44)
+                choose_game_rect = utils.button_rect(400, 110, w=360, h=44)
                 if play_rect.collidepoint(mx, my):
                     if selected_csv is None:
                         print("Choose a question CSV first.")
                     else:
-                        game = SpaceGame(selected_csv, settings=settings)
-                        game.load_sounds(".")  # load sounds from current folder
-                        result = game.run()
-                        csvs = list_csv_files(".")
+                        if game_idx >= 0 and game_idx < len(games):
+                            pkgname, label, cls = games[game_idx]
+                            game = cls(selected_csv, settings=settings)
+                            # let game load its sounds from its package assets first, then fallback
+                            try:
+                                ls = getattr(game, "load_sounds", None)
+                                if callable(ls):
+                                    ls(Path("games") / pkgname / "assets")
+                            except Exception:
+                                pass
+                            result = game.run()
+                            csvs = list_csv_files(".")
+                        else:
+                            print("No game selected.")
                 elif file_rect.collidepoint(mx, my):
                     csvs = list_csv_files(".")
                     if not csvs:
@@ -85,20 +105,36 @@ def run_menu():
                             except ValueError:
                                 selected_csv = csvs[0]
                 elif settings_rect.collidepoint(mx, my):
-                    run_settings_screen(screen, settings)
+                    # pass current selected game folder name to settings so music list can prioritize game-local music
+                    current_game = (
+                        games[game_idx][0] if (game_idx >= 0 and games) else None
+                    )
+                    run_settings_screen(screen, settings, current_game=current_game)
                 elif quit_rect.collidepoint(mx, my):
                     pygame.quit()
                     sys.exit(0)
+                elif choose_game_rect.collidepoint(mx, my):
+                    if games:
+                        game_idx = (game_idx + 1) % len(games)
 
         screen.fill((18, 18, 28))
         title = big.render("Study Gamify", True, (255, 255, 255))
         screen.blit(title, (400 - title.get_width() // 2, 30))
 
-        # draw buttons
+        choose_game_rect = utils.button_rect(400, 110, w=360, h=44)
+        pygame.draw.rect(screen, (80, 120, 90), choose_game_rect, border_radius=8)
+        game_label = "None"
+        if game_idx >= 0 and games:
+            game_label = games[game_idx][1]
+        screen.blit(
+            font.render(f"Game: {game_label}", True, (255, 255, 255)),
+            (choose_game_rect.x + 14, choose_game_rect.y + 10),
+        )
+
         play_rect = utils.button_rect(400, 170, w=360, h=60)
         pygame.draw.rect(screen, (60, 120, 180), play_rect, border_radius=8)
         screen.blit(
-            font.render("Play: Space Invaders (Study Mode)", True, (255, 255, 255)),
+            font.render("Play", True, (255, 255, 255)),
             (play_rect.x + 14, play_rect.y + 18),
         )
 
