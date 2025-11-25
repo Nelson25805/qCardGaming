@@ -36,6 +36,62 @@ def discover_games():
     return games
 
 
+# ----------------- music helpers for per-game defaults -----------------
+def _find_default_music_for_game(game_folder_name: str):
+    """
+    Return Path to first music file found for a game folder (or None).
+    Search order:
+      games/<game_folder_name>/assets/Music
+      games/<game_folder_name>/assets/music
+      assets/music
+      assets/Music
+      music
+      current folder
+    """
+    if not game_folder_name:
+        return None
+    exts = (".mp3", ".ogg", ".wav", ".flac")
+    search_dirs = [
+        Path("games") / game_folder_name / "assets" / "Music",
+        Path("games") / game_folder_name / "assets" / "music",
+        Path("assets") / "music",
+        Path("assets") / "Music",
+        Path("music"),
+        Path("."),
+    ]
+    seen = set()
+    for d in search_dirs:
+        if not d.exists() or not d.is_dir():
+            continue
+        for p in sorted(d.iterdir()):
+            if p.suffix.lower() in exts and p.is_file():
+                if p.name not in seen:
+                    return p
+    return None
+
+
+def _set_game_music_choice(settings: "Settings", game_folder_name: str):
+    """
+    Update settings.music_choice to the first music file for the given game
+    ONLY if settings.music is True. Do not start or stop playback here.
+    If no music file exists for the game, clear settings.music_choice.
+    This function does NOT save settings to disk (so the change is transient
+    until the user presses Save in the settings screen).
+    """
+    if not getattr(settings, "music", False):
+        # music disabled — do not change the saved selection
+        return
+
+    p = _find_default_music_for_game(game_folder_name)
+    if p is None:
+        settings.music_choice = ""
+    else:
+        settings.music_choice = p.name
+
+
+# ---------------------------------------------------------------------
+
+
 def run_menu():
     pygame.init()
     screen = pygame.display.set_mode((800, 600))
@@ -50,6 +106,11 @@ def run_menu():
     # discover games
     games = discover_games()
     game_idx = 0 if games else -1
+
+    # If a game is selected initially and music is ON, set a default music_choice for that game
+    if game_idx >= 0 and games and getattr(settings, "music", False):
+        initial_pkgname = games[game_idx][0]
+        _set_game_music_choice(settings, initial_pkgname)
 
     # default question file (try questions.csv)
     selected_csv = None
@@ -116,6 +177,10 @@ def run_menu():
                 elif choose_game_rect.collidepoint(mx, my):
                     if games:
                         game_idx = (game_idx + 1) % len(games)
+                        # update settings.music_choice to default for the selected game,
+                        # but ONLY if music is ON (do not change if music is off)
+                        pkgname = games[game_idx][0]
+                        _set_game_music_choice(settings, pkgname)
 
         screen.fill((18, 18, 28))
         title = big.render("Study Gamify", True, (255, 255, 255))
