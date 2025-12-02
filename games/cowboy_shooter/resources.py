@@ -1,18 +1,41 @@
+# games/cowboy_shooter/resources.py
 from pathlib import Path
 import pygame
 
-EXTS_AUDIO = ('.wav', '.ogg', '.mp3', '.flac')
-EXTS_IMAGE = ['.png', '.bmp', '.gif', '.jpg', '.jpeg', '.webp']
+EXTS_AUDIO = (".wav", ".ogg", ".mp3", ".flac")
+EXTS_IMAGE = [".png", ".bmp", ".gif", ".jpg", ".jpeg", ".webp"]
+
 
 def load_graphics(game, folder=None):
-    pkg_assets = Path(__file__).resolve().parent / 'assets' / 'Graphics'
+    """
+    Populate game.graphics with keys:
+      - 'player' -> surface or None
+      - 'bullet' -> surface or None
+      - 'bottle_frames' -> list of surfaces
+      - 'background' -> surface for the shelf/wall background
+    Searches package assets first, then optional `folder`, then top-level assets.
+    """
+    pkg_assets = Path(__file__).resolve().parent / "assets" / "Graphics"
     candidates = []
     if folder:
         candidates.append(Path(folder))
-    candidates += [pkg_assets, Path('assets') / 'Graphics', Path('assets'), Path('.')]
+    candidates += [pkg_assets, Path("assets") / "Graphics", Path("assets"), Path(".")]
+
     player_img = None
     bullet_img = None
     bottle_frames = []
+    background_img = None
+
+    def name_has_any(n, toks):
+        ln = n.lower()
+        for t in toks:
+            if t in ln:
+                return True
+        return False
+
+    # background name tokens - purposely avoid overly ambiguous tokens like "back"
+    bg_tokens = ("shelf", "wall", "background", "scene", "stage", "wood", "plank")
+
     for d in candidates:
         if not d.exists() or not d.is_dir():
             continue
@@ -24,50 +47,60 @@ def load_graphics(game, folder=None):
             except Exception:
                 continue
             name = p.stem.lower()
-            if 'player' in name or 'cowboy' in name or 'back' in name:
-                if player_img is None:
-                    player_img = surf
-            elif 'bullet' in name or 'shot' in name:
-                if bullet_img is None:
-                    bullet_img = surf
-            elif 'bottle' in name:
-                # maintain approximate ordering by name: intact, crack, shatter
-                if 'intact' in name:
+
+            # Prefer explicit background images by name
+            if background_img is None and name_has_any(name, bg_tokens):
+                # Avoid selecting images that are clearly player/back-view named
+                # e.g. "player_back" or "cowboy_back" -> treat as player instead of background
+                if not any(
+                    k in name for k in ("player", "cowboy", "backview", "back_view")
+                ):
+                    background_img = surf
+                    # (do not `continue` here; we still want to allow other categories to pick up other files)
+                    continue
+
+            # bottle frames detection
+            if "bottle" in name:
+                if "intact" in name:
                     bottle_frames.insert(0, surf)
-                elif 'crack' in name:
+                elif "crack" in name:
                     bottle_frames.append(surf)
-                elif 'shatter' in name:
+                elif "shatter" in name:
                     bottle_frames.append(surf)
                 else:
                     bottle_frames.insert(0, surf)
-    game.graphics['player'] = player_img
-    game.graphics['bullet'] = bullet_img
-    game.graphics['bottle_frames'] = bottle_frames
+                continue
 
-def load_sounds(game, folder=None):
-    pkg_assets = Path(__file__).resolve().parent / 'assets' / 'Sound Effects'
-    cand_dirs = []
-    if folder:
-        cand_dirs.append(Path(folder))
-    cand_dirs += [pkg_assets, Path('assets') / 'Sound Effects', Path('assets'), Path('.')]
+            # player image detection
+            if any(k in name for k in ("player", "cowboy", "backview", "back_view")):
+                if player_img is None:
+                    player_img = surf
+                continue
 
-    def try_load(p):
-        try:
-            return pygame.mixer.Sound(str(p))
-        except Exception:
-            return None
+            # bullet / shot detection
+            if any(k in name for k in ("bullet", "shot", "projectile")):
+                if bullet_img is None:
+                    bullet_img = surf
+                continue
 
-    for d in cand_dirs:
-        if not d.exists() or not d.is_dir():
-            continue
-        for p in sorted(d.iterdir()):
-            if p.suffix.lower() in EXTS_AUDIO and p.is_file():
-                key = p.stem.lower()
-                s = try_load(p)
-                if s:
-                    game.sfx_bank[key] = s
+            # fallback: if no background yet and filename still hints at shelf/wall, use it
+            if background_img is None and name_has_any(
+                name, ("shelf", "wall", "background")
+            ):
+                # again avoid accidentally picking player art
+                if not any(k in name for k in ("player", "cowboy")):
+                    background_img = surf
+                    continue
 
-    # provide friendly names
-    game.snd_shot = game.sfx_bank.get('shot') or game.sfx_bank.get('shoot')
-    game.snd_break = game.sfx_bank.get('break') or game.sfx_bank.get('impact')
-    game.snd_jam = game.sfx_bank.get('jam') or game.sfx_bank.get('click')
+    # assign back to game.graphics (no trailing comma)
+    game.graphics["player"] = player_img
+    game.graphics["bullet"] = bullet_img
+    game.graphics["bottle_frames"] = bottle_frames
+    if background_img is not None:
+        game.graphics["background"] = background_img
+
+    # Optional debug: uncomment to print what was loaded at runtime
+    # print("resources.load_graphics: player=", getattr(player_img, "get_size", lambda: None)(),
+    #       "bullet=", getattr(bullet_img, "get_size", lambda: None)(),
+    #       "bottles=", len(bottle_frames),
+    #       "background=", getattr(background_img, "get_size", lambda: None)())
