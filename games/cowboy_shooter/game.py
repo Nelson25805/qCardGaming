@@ -18,7 +18,12 @@ class CowboyGame:
         self.snd_shot = None
         self.snd_break = None
         self.snd_jam = None
-        self.graphics = {"player": None, "bullet": None, "bottle_frames": []}
+        self.graphics = {
+            "player": None,
+            "bullet": None,
+            "bottle_frames": [],
+            "background": None,
+        }
         self.player = None
         self.player_group = None
         self.bullets = None
@@ -60,6 +65,7 @@ class CowboyGame:
         resources.load_sounds(self, folder)
 
     def load_graphics(self, folder=None):
+        # resources.load_graphics will fill 'player','bullet','bottle_frames' and possibly 'background'
         resources.load_graphics(self, folder)
 
     def spawn_bottles(self, count=None):
@@ -220,6 +226,51 @@ class CowboyGame:
                     except:
                         pass
 
+        # overlay geometry defaults (width and padding) — height computed dynamically
+        OVERLAY_W = SCREEN_W - 200
+        CHOICE_H = 40
+        CHOICE_GAP = 8
+        CHOICE_PAD_X = 16
+        TOP_PAD = 12
+        BOTTOM_PAD = 12
+        MAX_OVERLAY_H = SCREEN_H - 120
+
+        def compute_overlay_layout():
+            """
+            Returns: overlay_rect, qlines (list of strings), choice_rects (list of pygame.Rect)
+            The overlay height is computed based on question text and how many choices there are.
+            """
+            max_text_w = OVERLAY_W - 2 * CHOICE_PAD_X
+            qlines = (
+                utils.wrap_text(self.current_q["q"], bigfont, max_text_w)
+                if self.current_q
+                else []
+            )
+            q_line_h = bigfont.get_height()
+            q_text_height = len(qlines) * (q_line_h + 4)
+
+            choices_total_h = len(self.choices) * CHOICE_H + max(
+                0, (len(self.choices) - 1) * CHOICE_GAP
+            )
+
+            overlay_h = TOP_PAD + q_text_height + 8 + choices_total_h + BOTTOM_PAD
+            overlay_h = min(overlay_h, MAX_OVERLAY_H)
+
+            overlay_x = (SCREEN_W - OVERLAY_W) // 2
+            overlay_y = SCREEN_H - overlay_h - 40  # anchored near bottom
+
+            overlay_rect = pygame.Rect(overlay_x, overlay_y, OVERLAY_W, overlay_h)
+
+            # compute choice rect positions inside overlay
+            choices_start_y = overlay_rect.y + TOP_PAD + q_text_height + 8
+            rects = []
+            for i in range(len(self.choices)):
+                rx = overlay_rect.x + CHOICE_PAD_X
+                ry = choices_start_y + i * (CHOICE_H + CHOICE_GAP)
+                r = pygame.Rect(rx, ry, OVERLAY_W - 2 * CHOICE_PAD_X, CHOICE_H)
+                rects.append(r)
+            return overlay_rect, qlines, rects
+
         running = True
         while running:
             dt = clock.tick(60)
@@ -234,7 +285,8 @@ class CowboyGame:
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if self.state == "asking" and self.current_q:
                         mx, my = event.pos
-                        rects = utils.choice_rects(SCREEN_W, SCREEN_H)
+                        # compute the same overlay/choice rects used when drawing
+                        overlay_rect, qlines, rects = compute_overlay_layout()
                         for i, r in enumerate(rects[: len(self.choices)]):
                             if r.collidepoint(mx, my):
                                 if i == self.correct_choice_index:
@@ -390,7 +442,52 @@ class CowboyGame:
             # draw
             screen.fill((60, 50, 30))
             wall_rect = pygame.Rect(60, 80, SCREEN_W - 120, 240)
-            pygame.draw.rect(screen, (90, 70, 50), wall_rect)
+
+            # draw shelf/background: prefer explicit background image if available
+            bg = self.graphics.get("background")
+            if bg:
+                try:
+                    bg_scaled = pygame.transform.smoothscale(
+                        bg, (wall_rect.w, wall_rect.h)
+                    )
+                    screen.blit(bg_scaled, (wall_rect.x, wall_rect.y))
+                except Exception:
+                    pygame.draw.rect(screen, (90, 70, 50), wall_rect)
+            else:
+                # wood plank look
+                plank_h = max(24, wall_rect.h // 4)
+                for i in range(4):
+                    py = wall_rect.y + i * plank_h
+                    ph = (
+                        plank_h
+                        if (py + plank_h) <= wall_rect.bottom
+                        else (wall_rect.bottom - py)
+                    )
+                    r = pygame.Rect(wall_rect.x, py, wall_rect.w, ph)
+                    color = (110, 85, 50) if i % 2 == 0 else (100, 75, 45)
+                    pygame.draw.rect(screen, color, r)
+                    # subtle grain lines
+                    for gx in range(r.x + 8, r.x + r.w - 8, 24):
+                        pygame.draw.line(
+                            screen,
+                            (80, 60, 30),
+                            (gx, r.y + 2),
+                            (gx + 6, r.y + ph - 4),
+                            1,
+                        )
+                # shelf ledge
+                ledge = pygame.Rect(
+                    wall_rect.x - 8, wall_rect.bottom - 10, wall_rect.w + 16, 12
+                )
+                pygame.draw.rect(screen, (70, 50, 30), ledge)
+                pygame.draw.line(
+                    screen,
+                    (40, 30, 20),
+                    (ledge.x, ledge.y),
+                    (ledge.x + ledge.w, ledge.y),
+                    2,
+                )
+
             self.bottles.draw(screen)
             self.player_group.draw(screen)
             self.bullets.draw(screen)
@@ -401,20 +498,24 @@ class CowboyGame:
             )
             screen.blit(hud, (10, 10))
 
+            # draw question overlay with dynamic height so it fully covers Q + choices
             if self.state == "asking" and self.current_q:
-                overlay = pygame.Surface((SCREEN_W - 60, SCREEN_H - 220))
-                overlay.set_alpha(220)
-                overlay.fill((30, 30, 40))
-                ox = 30
-                oy = 80
-                screen.blit(overlay, (ox, oy))
-                qlines = utils.wrap_text(self.current_q["q"], bigfont, SCREEN_W - 120)
-                qy = oy + 12
+                overlay_rect, qlines, rects = compute_overlay_layout()
+                overlay = pygame.Surface(
+                    (overlay_rect.w, overlay_rect.h), flags=pygame.SRCALPHA
+                )
+                # use per-pixel alpha to ensure overlay fully covers the area
+                overlay.fill((28, 28, 40, 200))
+                screen.blit(overlay, (overlay_rect.x, overlay_rect.y))
+
+                # render question lines at top of overlay
+                qy = overlay_rect.y + TOP_PAD
                 for line in qlines:
                     textsurf = bigfont.render(line, True, (255, 255, 255))
-                    screen.blit(textsurf, (ox + 18, qy))
+                    screen.blit(textsurf, (overlay_rect.x + CHOICE_PAD_X, qy))
                     qy += textsurf.get_height() + 4
-                rects = utils.choice_rects(SCREEN_W, SCREEN_H)
+
+                # render choice rects inside overlay
                 for i, r in enumerate(rects[: len(self.choices)]):
                     pygame.draw.rect(screen, (80, 80, 120), r, border_radius=6)
                     lines = utils.wrap_text(self.choices[i], font, r.w - 16)
