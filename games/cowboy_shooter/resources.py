@@ -33,7 +33,7 @@ def load_graphics(game, folder=None):
                 return True
         return False
 
-    # background name tokens - purposely avoid overly ambiguous tokens like "back"
+    # background name tokens - avoid overly ambiguous tokens like "back"
     bg_tokens = ("shelf", "wall", "background", "scene", "stage", "wood", "plank")
 
     for d in candidates:
@@ -51,12 +51,11 @@ def load_graphics(game, folder=None):
             # Prefer explicit background images by name
             if background_img is None and name_has_any(name, bg_tokens):
                 # Avoid selecting images that are clearly player/back-view named
-                # e.g. "player_back" or "cowboy_back" -> treat as player instead of background
                 if not any(
                     k in name for k in ("player", "cowboy", "backview", "back_view")
                 ):
                     background_img = surf
-                    # (do not `continue` here; we still want to allow other categories to pick up other files)
+                    # keep scanning for other assets
                     continue
 
             # bottle frames detection
@@ -87,7 +86,6 @@ def load_graphics(game, folder=None):
             if background_img is None and name_has_any(
                 name, ("shelf", "wall", "background")
             ):
-                # again avoid accidentally picking player art
                 if not any(k in name for k in ("player", "cowboy")):
                     background_img = surf
                     continue
@@ -99,8 +97,58 @@ def load_graphics(game, folder=None):
     if background_img is not None:
         game.graphics["background"] = background_img
 
-    # Optional debug: uncomment to print what was loaded at runtime
-    # print("resources.load_graphics: player=", getattr(player_img, "get_size", lambda: None)(),
-    #       "bullet=", getattr(bullet_img, "get_size", lambda: None)(),
-    #       "bottles=", len(bottle_frames),
-    #       "background=", getattr(background_img, "get_size", lambda: None)())
+
+def load_sounds(game, folder=None):
+    """
+    Populate game.sfx_bank with pygame.mixer.Sound objects from:
+      - optional folder
+      - package assets/Sound Effects
+      - assets/Sound Effects
+      - assets
+      - current folder
+
+    Keys are filenames (stem) lowercased.
+    """
+    pkg_assets = Path(__file__).resolve().parent / "assets" / "Sound Effects"
+    cand_dirs = []
+    if folder:
+        cand_dirs.append(Path(folder))
+    cand_dirs += [
+        pkg_assets,
+        Path("assets") / "Sound Effects",
+        Path("assets"),
+        Path("."),
+    ]
+
+    def try_load(p):
+        try:
+            return pygame.mixer.Sound(str(p))
+        except Exception:
+            return None
+
+    for d in cand_dirs:
+        if not d.exists() or not d.is_dir():
+            continue
+        for p in sorted(d.iterdir()):
+            if p.suffix.lower() in EXTS_AUDIO and p.is_file():
+                key = p.stem.lower()
+                s = try_load(p)
+                if s:
+                    game.sfx_bank[key] = s
+
+    # set friendly lookups (game may also set these)
+    # do not overwrite if already assigned by caller
+    if getattr(game, "snd_shot", None) is None:
+        game.snd_shot = game.sfx_bank.get("shot") or game.sfx_bank.get("shoot")
+    if getattr(game, "snd_break", None) is None:
+        game.snd_break = (
+            game.sfx_bank.get("break")
+            or game.sfx_bank.get("impact")
+            or game.sfx_bank.get("shatter")
+        )
+    if getattr(game, "snd_jam", None) is None:
+        game.snd_jam = (
+            game.sfx_bank.get("jam")
+            or game.sfx_bank.get("click")
+            or game.sfx_bank.get("misfire")
+        )
