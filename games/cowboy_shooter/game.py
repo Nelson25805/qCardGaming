@@ -1,3 +1,4 @@
+# games/cowboy_shooter/game.py
 from pathlib import Path
 import pygame, random, math
 from .helpers import SCREEN_W, SCREEN_H
@@ -44,6 +45,13 @@ class CowboyGame:
         # flags from settings (defaults)
         self.sfx_enabled = True
         self.music_enabled = False
+
+        # UI / timers
+        self.muzzle_timer = 0
+        self.muzzle_flash = True
+
+        # session timer in milliseconds (None = unlimited)
+        self.session_time_ms = None
 
     def load_questions(self):
         # Read questions and build answer_pool, then apply ordering from settings
@@ -159,6 +167,17 @@ class CowboyGame:
         self.correct_choice_index = self.choices.index(self.current_q["a"])
         self.state = "asking"
 
+    def _reset_session_timer_from_settings(self):
+        """(re)initialize the session_time_ms based on settings.total_time (seconds)."""
+        if getattr(self.settings, "total_time", None) is None:
+            self.session_time_ms = None
+        else:
+            # settings.total_time stored in seconds
+            try:
+                self.session_time_ms = int(float(self.settings.total_time) * 1000)
+            except Exception:
+                self.session_time_ms = None
+
     def run(self):
         pygame.init()
         try:
@@ -169,6 +188,15 @@ class CowboyGame:
         clock = pygame.time.Clock()
         font = pygame.font.Font(None, 18)
         bigfont = pygame.font.Font(None, 24)
+        smallfont = pygame.font.Font(None, 16)
+
+        # muzzle flash option
+        self.muzzle_timer = 0
+        self.muzzle_flash = (
+            bool(getattr(self.settings, "muzzle_flash", True))
+            if self.settings is not None
+            else True
+        )
 
         # load questions and prepare the first question
         self.load_questions()
@@ -194,6 +222,9 @@ class CowboyGame:
             self.sfx_enabled = bool(getattr(self.settings, "sfx", True))
             self.music_enabled = bool(getattr(self.settings, "music", False))
 
+        # initialize session timer from settings
+        self._reset_session_timer_from_settings()
+
         try:
             self.load_sounds(
                 Path("games") / "cowboy_shooter" / "assets" / "Sound Effects"
@@ -205,9 +236,9 @@ class CowboyGame:
                 pass
 
         # friendly sfx attrs
-        self.snd_shot = self.sfx_bank.get("shot")
-        self.snd_break = self.sfx_bank.get("break")
-        self.snd_jam = self.sfx_bank.get("jam")
+        self.snd_shot = self.sfx_bank.get("shot") or self.sfx_bank.get("shoot")
+        self.snd_break = self.sfx_bank.get("break") or self.sfx_bank.get("impact")
+        self.snd_jam = self.sfx_bank.get("jam") or self.sfx_bank.get("click")
 
         # music start (prefer per-game music, then global)
         if self.music_enabled:
@@ -271,9 +302,33 @@ class CowboyGame:
                 rects.append(r)
             return overlay_rect, qlines, rects
 
+        def format_time_ms(ms):
+            """Format milliseconds to M:SS or H:MM:SS."""
+            if ms is None:
+                return "∞"
+            s = max(0, int(ms // 1000))
+            h = s // 3600
+            m = (s % 3600) // 60
+            sec = s % 60
+            if h > 0:
+                return f"{h}:{m:02d}:{sec:02d}"
+            return f"{m}:{sec:02d}"
+
         running = True
         while running:
             dt = clock.tick(60)
+
+            # --- session timer tick ---
+            if getattr(self, "session_time_ms", None) is not None:
+                self.session_time_ms = max(0, self.session_time_ms - dt)
+                if self.session_time_ms <= 0 and self.state not in ("won", "game_over"):
+                    # time's up -> end run
+                    self.state = "game_over"
+                    try:
+                        pygame.mixer.music.stop()
+                    except:
+                        pass
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     try:
@@ -318,6 +373,9 @@ class CowboyGame:
                                             image=self.graphics.get("bullet"),
                                         )
                                         self.bullets.add(bl)
+
+                                        # muzzle flash + shot sfx
+                                        self.muzzle_timer = 120
                                         if self.snd_shot and self.sfx_enabled:
                                             try:
                                                 self.snd_shot.play()
@@ -439,7 +497,7 @@ class CowboyGame:
                     if self.state not in ("game_over", "won"):
                         self.state = "asking"
 
-            # draw
+            # ---------- drawing ----------
             screen.fill((60, 50, 30))
             wall_rect = pygame.Rect(60, 80, SCREEN_W - 120, 240)
 
@@ -454,7 +512,7 @@ class CowboyGame:
                 except Exception:
                     pygame.draw.rect(screen, (90, 70, 50), wall_rect)
             else:
-                # wood plank look
+                # wood plank look (fallback)
                 plank_h = max(24, wall_rect.h // 4)
                 for i in range(4):
                     py = wall_rect.y + i * plank_h
@@ -488,15 +546,72 @@ class CowboyGame:
                     2,
                 )
 
+            # draw sprites
             self.bottles.draw(screen)
             self.player_group.draw(screen)
             self.bullets.draw(screen)
 
+            # muzzle flash (draw last so it sits above player)
+            if getattr(self, "muzzle_timer", 0) > 0 and getattr(
+                self, "muzzle_flash", True
+            ):
+                try:
+                    self.muzzle_timer -= dt
+                except Exception:
+                    self.muzzle_timer = max(0, self.muzzle_timer - 16)
+                mx = self.player.rect.centerx
+                my = self.player.rect.top - 6
+                pygame.draw.circle(screen, (255, 220, 80), (mx, my), 8)
+
+            # HUD - top-left (score, lives)
             lives_display = "∞" if self.lives is None else str(self.lives)
             hud = font.render(
                 f"Score: {self.score}   Lives: {lives_display}", True, (255, 255, 255)
             )
             screen.blit(hud, (10, 10))
+
+            # Build status strings for top-right (show live session remaining)
+            session_label = "Session: ∞"
+            if getattr(self, "session_time_ms", None) is not None:
+                session_label = f"Session: {format_time_ms(self.session_time_ms)}"
+
+            # question timer label (still shows configured value or ∞)
+            if getattr(self, "settings", None):
+                tbq = getattr(self.settings, "time_between_questions", None)
+                if tbq is None:
+                    qlabel = "Q time: ∞"
+                else:
+                    qlabel = f"Q time: {int(tbq)}s"
+            else:
+                qlabel = "Q time: ∞"
+
+            # music status
+            music_label = "Music: Off"
+            if getattr(self, "music_enabled", False):
+                mc = (
+                    getattr(self.settings, "music_choice", "")
+                    if getattr(self, "settings", None)
+                    else ""
+                )
+                if mc:
+                    music_label = f"Music: On ({Path(mc).name})"
+                else:
+                    music_label = "Music: On (none)"
+
+            # render the right-side HUD
+            sx = SCREEN_W - 10
+            right1 = smallfont.render(session_label, True, (200, 200, 255))
+            right2 = smallfont.render(qlabel, True, (200, 200, 255))
+            right3 = smallfont.render(music_label, True, (200, 200, 255))
+            screen.blit(right1, (sx - right1.get_width(), 8))
+            screen.blit(right2, (sx - right2.get_width(), 8 + right1.get_height() + 2))
+            screen.blit(
+                right3,
+                (
+                    sx - right3.get_width(),
+                    8 + right1.get_height() + right2.get_height() + 6,
+                ),
+            )
 
             # draw question overlay with dynamic height so it fully covers Q + choices
             if self.state == "asking" and self.current_q:
@@ -547,6 +662,7 @@ class CowboyGame:
                 )
                 keys = pygame.key.get_pressed()
                 if keys[pygame.K_r]:
+                    # reset run state and timers (including session timer)
                     if getattr(self.settings, "lives", None) is None:
                         self.lives = None
                     else:
@@ -556,6 +672,8 @@ class CowboyGame:
                     self.question_index = 0
                     self.load_next_question()
                     self.setup_objects()
+                    # reset session timer from settings when restarting
+                    self._reset_session_timer_from_settings()
                     self.state = "asking"
                     if self.music_enabled:
                         try:
