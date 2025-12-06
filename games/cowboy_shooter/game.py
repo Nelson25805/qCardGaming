@@ -1,4 +1,3 @@
-# games/cowboy_shooter/game.py
 from pathlib import Path
 import pygame, random, math
 from .helpers import SCREEN_W, SCREEN_H
@@ -6,7 +5,6 @@ from . import sprites, resources
 import quiz_loader, utils
 
 MAX_BOTTLES_PER_WAVE = 24
-
 
 class CowboyGame:
     def __init__(self, csv_path, screen=None, settings=None):
