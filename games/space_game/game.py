@@ -1,5 +1,3 @@
-"""Refactored SpaceGame class — keeps the original behavior but split across modules."""
-
 import pygame, random, math, sys
 from pathlib import Path
 import quiz_loader
