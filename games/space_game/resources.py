@@ -1,6 +1,6 @@
 """Resource loading helpers (images, sounds, music) for the Space Game.
 
-This version prioritizes package-local assets (games/space_game/assets) for graphics,
+This python file prioritizes package-local assets (games/space_game/assets) for graphics,
 sound effects, and music so each game can ship its own assets. It still falls back
 to project-level assets/ if package-local assets are not present.
 """
