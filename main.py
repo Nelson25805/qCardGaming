@@ -1,4 +1,3 @@
-# main.py - modular launcher with game chooser and settings aware of selected game
 import pygame, sys, os, importlib
 from pathlib import Path
 import utils
