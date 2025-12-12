@@ -1,5 +1,8 @@
 # games/tower_defense/__init__.py
-from .game import TowerDefenseGame
+"""
+Tower defense game package entry.
+Expose Game so the launcher can import it as a module and find the class.
+"""
+from .game import TowerDefenseGame as Game
 
-# expose name used by discover_games()
-Game = TowerDefenseGame
+__all__ = ["Game"]

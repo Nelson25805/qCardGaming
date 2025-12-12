@@ -1,138 +1,104 @@
-# games/tower_defense/sprites.py
-import math
-import pygame
-from .helpers import SCREEN_W, SCREEN_H
-
-
+import pygame, math
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self, path_points, speed=60.0, image=None):
-        """
-        path_points: list[(x,y)] forming the loop path (the enemy will follow indices 0..n-1 and wrap)
-        speed: pixels/sec along path
-        """
+    def __init__(self, path, speed=60.0, image=None):
         super().__init__()
-        self.path = path_points
+        self.path = path or [(0,0)]
+        self.image = image.convert_alpha() if (image is not None and hasattr(image,'convert_alpha')) else None
+        if self.image is None:
+            surf = pygame.Surface((24,24), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (200,60,60), (12,12), 12)
+            self.image = surf
+        self.rect = self.image.get_rect()
+        self.idx = 0
+        self.pos = [float(self.path[0][0]), float(self.path[0][1])]
+        self.rect.center = (int(self.pos[0]), int(self.pos[1]))
         self.speed = float(speed)
-        self.pos = list(self.path[0])  # start at first point
-        self.index = 0
-        self.t = 0.0  # interpolation between index and index+1 (0..1)
-        self.rush = False  # when True: rush straight to goal (provided as attribute goal_pos set externally)
-        self.goal_pos = None
-        self.image = image if image is not None else self._make_placeholder()
-        self.rect = self.image.get_rect(center=self.pos)
+        self.rush = False
+        self.goal_index = None
         self.dead = False
-
-    def _make_placeholder(self):
-        surf = pygame.Surface((24, 24), pygame.SRCALPHA)
-        pygame.draw.circle(surf, (200, 60, 60), (12, 12), 12)
-        pygame.draw.circle(surf, (255, 180, 180), (9, 9), 3)
-        return surf
-
+    def set_goal_index(self, idx):
+        self.goal_index = int(idx)
+        self.rush = True
     def update(self, dt):
         if self.dead:
             return
-        if self.rush and self.goal_pos is not None:
-            # straight-line rush to goal (linear movement)
-            dx = self.goal_pos[0] - self.pos[0]
-            dy = self.goal_pos[1] - self.pos[1]
+        if not self.rush:
+            L = len(self.path)
+            if L < 2:
+                return
+            next_idx = (self.idx + 1) % L
+            nx, ny = self.path[next_idx]
+            dx = nx - self.pos[0]
+            dy = ny - self.pos[1]
             dist = math.hypot(dx, dy)
             if dist <= 1.0:
-                self.pos[0], self.pos[1] = self.goal_pos
+                self.pos[0] = nx; self.pos[1] = ny; self.idx = next_idx
             else:
-                vx = (dx / dist) * self.speed * dt
-                vy = (dy / dist) * self.speed * dt
-                self.pos[0] += vx
-                self.pos[1] += vy
+                step = self.speed * dt
+                self.pos[0] += dx / dist * step; self.pos[1] += dy / dist * step
         else:
-            # follow looped path by stepping along segments proportional to dt*speed
-            remaining = self.speed * dt
-            while remaining > 0 and not self.dead:
-                p0 = self.path[self.index]
-                p1 = self.path[(self.index + 1) % len(self.path)]
-                seg_dx = p1[0] - p0[0]
-                seg_dy = p1[1] - p0[1]
-                seg_len = math.hypot(seg_dx, seg_dy)
-                # position along segment in absolute pixels
-                abs_pos = self.index_pos(seg_len)
-                # distance left on current segment
-                to_end = (1.0 - self.t) * seg_len if seg_len > 0 else 0
-                step = min(remaining, to_end)
-                if seg_len > 0:
-                    frac = step / seg_len
+            if self.goal_index is None:
+                target = self.path[0]
+                tx,ty = target
+                dx = tx - self.pos[0]; dy = ty - self.pos[1]
+                dist = math.hypot(dx,dy) or 1.0
+                step = self.speed * 2.2 * dt
+                if step >= dist:
+                    self.pos[0] = tx; self.pos[1] = ty
                 else:
-                    frac = 0
-                self.t += frac
-                if self.t >= 1.0 - 1e-6:
-                    # move to next segment
-                    self.index = (self.index + 1) % len(self.path)
-                    self.t = 0.0
-                # update pos
-                p0 = self.path[self.index]
-                p1 = self.path[(self.index + 1) % len(self.path)]
-                self.pos[0] = p0[0] + (p1[0] - p0[0]) * self.t
-                self.pos[1] = p0[1] + (p1[1] - p0[1]) * self.t
-                remaining -= step
+                    self.pos[0] += dx / dist * step; self.pos[1] += dy / dist * step
+            else:
+                L = len(self.path)
+                if L < 2: return
+                next_idx = (self.idx + 1) % L
+                nx, ny = self.path[next_idx]
+                dx = nx - self.pos[0]; dy = ny - self.pos[1]
+                dist = math.hypot(dx,dy) or 1.0
+                step = self.speed * 2.5 * dt
+                if step >= dist:
+                    self.pos[0] = nx; self.pos[1] = ny; self.idx = next_idx
+                else:
+                    self.pos[0] += dx / dist * step; self.pos[1] += dy / dist * step
+                if self.idx == self.goal_index:
+                    self.rush = False
         self.rect.center = (int(self.pos[0]), int(self.pos[1]))
-
-    def index_pos(self, seg_len):
-        """helper, returns current absolute distance along current segment"""
-        return self.index * seg_len + self.t * seg_len
-
-
+class Projectile(pygame.sprite.Sprite):
+    def __init__(self, start_pos, target_pos, speed=320.0, image=None):
+        super().__init__()
+        self.image = image.convert_alpha() if (image is not None and hasattr(image,'convert_alpha')) else None
+        if self.image is None:
+            surf = pygame.Surface((8,8), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (240,220,120), (4,4), 4)
+            self.image = surf
+        self.rect = self.image.get_rect(center=(int(start_pos[0]), int(start_pos[1])))
+        self.pos = [float(start_pos[0]), float(start_pos[1])]
+        self.target = (float(target_pos[0]), float(target_pos[1]))
+        self.speed = float(speed)
+    def update(self, dt):
+        tx,ty = self.target
+        dx = tx - self.pos[0]; dy = ty - self.pos[1]
+        dist = math.hypot(dx,dy)
+        if dist <= 2.0:
+            self.kill(); return
+        step = self.speed * dt
+        if step >= dist:
+            self.pos[0] = tx; self.pos[1] = ty
+        else:
+            self.pos[0] += dx / dist * step; self.pos[1] += dy / dist * step
+        self.rect.center = (int(self.pos[0]), int(self.pos[1]))
 class Tower(pygame.sprite.Sprite):
     def __init__(self, x, y, image=None):
         super().__init__()
-        if image is not None:
-            self.image = image
-        else:
-            self.image = pygame.Surface((28, 28), pygame.SRCALPHA)
-            pygame.draw.rect(self.image, (80, 140, 60), (0, 0, 28, 28), border_radius=6)
-        self.rect = self.image.get_rect(center=(x, y))
-        self.pos = (x, y)
-
-    def shoot_at(self, target_pos, projectile_group, image=None, speed=400.0):
-        # spawn a projectile targeted at target_pos
-        proj = Projectile(
-            self.rect.centerx, self.rect.centery, target_pos, image=image, speed=speed
-        )
+        self.image = image.convert_alpha() if (image is not None and hasattr(image,'convert_alpha')) else None
+        if self.image is None:
+            surf = pygame.Surface((28,28), pygame.SRCALPHA)
+            pygame.draw.rect(surf, (80,120,200), (0,0,28,28), border_radius=6)
+            pygame.draw.circle(surf, (180,200,240), (14,14), 6)
+            self.image = surf
+        self.rect = self.image.get_rect(center=(int(x), int(y)))
+        self.pos = (float(x), float(y))
+    def shoot_at(self, target_pos, projectile_group, image=None):
+        from .sprites import Projectile
+        proj = Projectile(self.pos, target_pos, speed=360.0, image=image)
         projectile_group.add(proj)
         return proj
-
-
-class Projectile(pygame.sprite.Sprite):
-    def __init__(self, x, y, target_pos, image=None, speed=400.0):
-        super().__init__()
-        if image is not None:
-            self.image = image
-        else:
-            self.image = pygame.Surface((6, 6), pygame.SRCALPHA)
-            pygame.draw.circle(self.image, (255, 220, 80), (3, 3), 3)
-        self.rect = self.image.get_rect(center=(x, y))
-        self.pos = [float(x), float(y)]
-        self.target = tuple(target_pos)
-        self.speed = float(speed)
-        dx = self.target[0] - self.pos[0]
-        dy = self.target[1] - self.pos[1]
-        dist = math.hypot(dx, dy)
-        if dist > 0:
-            self.vx = dx / dist * self.speed
-            self.vy = dy / dist * self.speed
-        else:
-            self.vx = 0
-            self.vy = -self.speed
-        self.dead = False
-
-    def update(self, dt=0):
-        if self.dead:
-            return
-        self.pos[0] += self.vx * dt
-        self.pos[1] += self.vy * dt
-        self.rect.center = (int(self.pos[0]), int(self.pos[1]))
-        # very large bounds kill
-        if (
-            self.pos[0] < -100
-            or self.pos[1] < -100
-            or self.pos[0] > SCREEN_W + 100
-            or self.pos[1] > SCREEN_H + 100
-        ):
-            self.kill()
