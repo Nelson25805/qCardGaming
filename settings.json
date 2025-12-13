@@ -1,11 +1,11 @@
 {
   "question_order": "top",
-  "time_between_questions": null,
+  "time_between_questions": 10,
   "total_time": 300,
   "lives": 5,
   "sfx": true,
   "music": true,
-  "music_choice": "Burning Trapezoid of Fire.mp3",
+  "music_choice": "music_loop.wav",
   "question_mode": "one_each",
   "enemy_speed_multiplier": 0.75,
   "muzzle_flash": true

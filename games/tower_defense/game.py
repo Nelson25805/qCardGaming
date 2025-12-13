@@ -85,7 +85,8 @@ class TowerDefenseGame:
 
     def load_next_question(self):
         """
-        Prepare the next question, start its question timer, and spawn a single enemy.
+        Prepare the next question, start its question timer (only if set),
+        and spawn a single enemy.
         """
         if not self.questions:
             self.current_q = None
@@ -122,14 +123,15 @@ class TowerDefenseGame:
         random.shuffle(self.choices)
         self.correct_choice_index = self.choices.index(self.current_q["a"])
 
-        # question timer (ms)
+        # question timer (ms) — only record a start time if timer exists
         tbq = getattr(self.settings, "time_between_questions", None)
         if tbq is None:
             self.question_timer_ms = None
+            self.question_timer_start = None
         else:
             # settings store seconds; convert to ms
             self.question_timer_ms = int(tbq * 1000)
-        self.question_timer_start = pygame.time.get_ticks()
+            self.question_timer_start = pygame.time.get_ticks()
 
         # spawn exactly one enemy for this question
         self.spawn_enemy_for_question()
@@ -201,6 +203,8 @@ class TowerDefenseGame:
         """
         Spawn exactly one enemy at spawn_pos and add to group.
         Enemy object expects to follow `self.path`.
+        Initialize rush/loop flags so default behaviour is to loop until
+        the player answers or a timeout/wrong answer forces a rush.
         """
         if not self.path:
             self.build_looped_path()
@@ -213,12 +217,23 @@ class TowerDefenseGame:
         speed = base_speed * float(multiplier)
         eimg = self.graphics.get("creature")
         enemy = sprites.Enemy(self.path, speed=speed, image=eimg)
-        # force spawn at spawn_pos (path[0] == spawn)
+        # ensure enemy position is set to spawn (path[0] == spawn)
         enemy.pos = [float(self.spawn_pos[0]), float(self.spawn_pos[1])]
         enemy.rect.center = (int(enemy.pos[0]), int(enemy.pos[1]))
         enemy.goal_pos = self.goal_pos
+
+        # Defensive initialisation: explicit state so enemy won't rush immediately.
+        enemy.rush = False
+        enemy.looping = True
+        # helpful hint index for some sprite implementations
+        try:
+            enemy.path_index = 0
+        except Exception:
+            # ignore if attribute not used by that sprite impl
+            pass
+
         self.enemies.add(enemy)
-        # ensure state is asking (overlay will show)
+        # set state
         self.state = "asking"
 
     # ---------------- helpers ----------------
@@ -419,7 +434,6 @@ class TowerDefenseGame:
                                         nearest = None
                                         nd = 1e9
                                         for t in self.towers:
-                                            # tower sprites must provide pos attribute; if not, fall back to rect.center
                                             tpos = getattr(
                                                 t,
                                                 "pos",
@@ -464,7 +478,6 @@ class TowerDefenseGame:
                                         # no enemies -> award and advance
                                         self.score += 100
                                         self.load_next_question()
-
                                 else:
                                     # wrong -> force enemies to rush to goal
                                     for e in list(self.enemies):
@@ -514,6 +527,9 @@ class TowerDefenseGame:
 
             # enemies reach goal
             for e in list(self.enemies):
+                # only treat as reaching the goal if the enemy is rushing toward it
+                if not getattr(e, "rush", False):
+                    continue
                 dx = e.pos[0] - self.goal_pos[0]
                 dy = e.pos[1] - self.goal_pos[1]
                 if math.hypot(dx, dy) < 12:
@@ -532,7 +548,6 @@ class TowerDefenseGame:
                         except:
                             pass
                     else:
-                        # advance question after damage (if waiting for hit, finish)
                         if self.finish_after_hit:
                             self.finish_after_hit = False
                             self.load_next_question()
@@ -540,15 +555,14 @@ class TowerDefenseGame:
                             if self.state not in ("game_over", "won"):
                                 self.state = "asking"
 
-            # handle question timer expiration (only once per expiration)
+            # handle question timer expiration (only when both timer and start are present)
             if (
                 self.question_timer_ms is not None
+                and self.question_timer_start is not None
                 and self.state == "asking"
                 and self.current_q
             ):
-                elapsed = pygame.time.get_ticks() - (
-                    self.question_timer_start or pygame.time.get_ticks()
-                )
+                elapsed = pygame.time.get_ticks() - self.question_timer_start
                 remaining = max(0, int(self.question_timer_ms - elapsed))
                 if remaining <= 0:
                     # treat as wrong answer
