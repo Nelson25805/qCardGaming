@@ -1,6 +1,6 @@
-# games/tower_defense/sprites.py
 import pygame
 import math
+
 
 class Enemy(pygame.sprite.Sprite):
     """
@@ -9,6 +9,7 @@ class Enemy(pygame.sprite.Sprite):
     If `rush` is True it will run straight toward .goal_pos and be
     considered to have 'reached' the goal when close enough.
     """
+
     def __init__(self, path, speed=60.0, image=None):
         super().__init__()
         self.path = list(path)[:]  # list of (x,y)
@@ -101,6 +102,7 @@ class Tower(pygame.sprite.Sprite):
     Simple tower sprite located at (x,y). shoot_at() creates a Projectile that travels
     toward the given target_pos and is added to the provided group.
     """
+
     def __init__(self, x, y, image=None):
         super().__init__()
         self.pos = (float(x), float(y))
@@ -109,10 +111,14 @@ class Tower(pygame.sprite.Sprite):
                 self.image = image.convert_alpha()
             except Exception:
                 self.image = pygame.Surface((28, 28), pygame.SRCALPHA)
-                pygame.draw.rect(self.image, (100, 140, 200), (0,0,28,28), border_radius=6)
+                pygame.draw.rect(
+                    self.image, (100, 140, 200), (0, 0, 28, 28), border_radius=6
+                )
         else:
             self.image = pygame.Surface((28, 28), pygame.SRCALPHA)
-            pygame.draw.rect(self.image, (100, 140, 200), (0,0,28,28), border_radius=6)
+            pygame.draw.rect(
+                self.image, (100, 140, 200), (0, 0, 28, 28), border_radius=6
+            )
         self.rect = self.image.get_rect(center=(int(self.pos[0]), int(self.pos[1])))
 
     def shoot_at(self, target_pos, projectile_group, image=None, speed=400.0):
@@ -126,6 +132,7 @@ class Projectile(pygame.sprite.Sprite):
     """
     Projectile that moves toward a fixed target position. Kills itself on arrival.
     """
+
     def __init__(self, start_pos, target_pos, speed=400.0, image=None):
         super().__init__()
         self.start = (float(start_pos[0]), float(start_pos[1]))
@@ -136,10 +143,10 @@ class Projectile(pygame.sprite.Sprite):
                 self.image = image.convert_alpha()
             except Exception:
                 self.image = pygame.Surface((8, 8), pygame.SRCALPHA)
-                pygame.draw.circle(self.image, (220,220,100), (4,4), 4)
+                pygame.draw.circle(self.image, (220, 220, 100), (4, 4), 4)
         else:
             self.image = pygame.Surface((8, 8), pygame.SRCALPHA)
-            pygame.draw.circle(self.image, (220,220,100), (4,4), 4)
+            pygame.draw.circle(self.image, (220, 220, 100), (4, 4), 4)
         self.rect = self.image.get_rect(center=(int(self.start[0]), int(self.start[1])))
         self.pos = [float(self.start[0]), float(self.start[1])]
         # direction
