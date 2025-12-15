@@ -1,3 +1,4 @@
+# games/tower_defense/game.py
 from pathlib import Path
 import pygame
 import random
@@ -15,6 +16,7 @@ class TowerDefenseGame:
       - one enemy spawns per question
       - correct answer -> nearest tower shoots and kills enemy
       - wrong answer or timeout -> enemy rushes to goal and damages power source
+        (life lost only when enemy actually reaches the power source)
     """
 
     def __init__(self, csv_path, screen=None, settings=None):
@@ -50,7 +52,9 @@ class TowerDefenseGame:
         # gameplay
         self.score = 0
         self.lives = 3
-        self.state = "asking"  # asking, playing (projectile in-flight), game_over, won
+        self.state = (
+            "asking"  # asking, playing (projectile/enemy active), game_over, won
+        )
         self.finish_after_hit = False
 
         # timers (ms)
@@ -149,7 +153,7 @@ class TowerDefenseGame:
     def build_looped_path(self):
         """
         Build a smooth loop path (list of (x,y)) sized to the screen.
-        Path is arranged so index 0 == spawn, halfway == goal (approx).
+        Path is arranged so index 0 == spawn (left) and index ~half == goal (right).
         """
         cx = SCREEN_W // 2
         cy = SCREEN_H // 2 - 20
@@ -224,11 +228,9 @@ class TowerDefenseGame:
         # Defensive initialisation: explicit state so enemy won't rush immediately.
         enemy.rush = False
         enemy.looping = True
-        # helpful hint index for some sprite implementations
         try:
             enemy.path_index = 0
         except Exception:
-            # ignore if attribute not used by that sprite impl
             pass
 
         self.enemies.add(enemy)
@@ -478,26 +480,24 @@ class TowerDefenseGame:
                                         self.score += 100
                                         self.load_next_question()
                                 else:
-                                    # wrong -> force enemies to rush to goal
+                                    # WRONG ANSWER:
+                                    # --- DO NOT subtract life now ---
+                                    # Instruct current enemies to rush along path toward goal (path-follow)
                                     for e in list(self.enemies):
-                                        e.rush = True
-                                        e.goal_pos = self.goal_pos
+                                        # use sprite helper to set rush along path toward goal waypoint
+                                        if hasattr(e, "set_rush_to_goal"):
+                                            e.set_rush_to_goal(self.goal_pos)
+                                        else:
+                                            e.rush = True
+                                            e.goal_pos = self.goal_pos
                                     if self.snd_rush and self.sfx_enabled:
                                         try:
                                             self.snd_rush.play()
                                         except:
                                             pass
-                                    if self.lives is not None:
-                                        self.lives -= 1
-                                    if self.lives is not None and self.lives <= 0:
-                                        self.state = "game_over"
-                                        try:
-                                            pygame.mixer.music.stop()
-                                        except:
-                                            pass
-                                    else:
-                                        # advance to next question (do not repeat)
-                                        self.load_next_question()
+                                    # hide question overlay and let the enemy reach the goal.
+                                    self.state = "playing"
+                                    # DO NOT call load_next_question() here — wait until enemy reaches goal
                                 break
 
             # update all sprites
@@ -524,20 +524,29 @@ class TowerDefenseGame:
                         if self.state not in ("game_over", "won"):
                             self.state = "asking"
 
-            # enemies reach goal
+            # enemies reach goal (only if the enemy is rushing along the path and actually reached waypoint)
             for e in list(self.enemies):
                 # only treat as reaching the goal if the enemy is rushing toward it
                 if not getattr(e, "rush", False):
                     continue
-                dx = e.pos[0] - self.goal_pos[0]
-                dy = e.pos[1] - self.goal_pos[1]
-                if math.hypot(dx, dy) < 12:
+                # use path-based reach test if sprite provides it
+                reached = False
+                if hasattr(e, "reached_goal_on_path"):
+                    reached = e.reached_goal_on_path(threshold=12)
+                else:
+                    dx = e.pos[0] - self.goal_pos[0]
+                    dy = e.pos[1] - self.goal_pos[1]
+                    reached = math.hypot(dx, dy) < 12
+
+                if reached:
+                    # enemy reached power source -> damage, then advance question
                     e.kill()
                     if self.snd_hit and self.sfx_enabled:
                         try:
                             self.snd_hit.play()
                         except:
                             pass
+                    # now subtract life (only upon actual arrival)
                     if self.lives is not None:
                         self.lives -= 1
                     if self.lives is not None and self.lives <= 0:
@@ -547,12 +556,8 @@ class TowerDefenseGame:
                         except:
                             pass
                     else:
-                        if self.finish_after_hit:
-                            self.finish_after_hit = False
-                            self.load_next_question()
-                        else:
-                            if self.state not in ("game_over", "won"):
-                                self.state = "asking"
+                        # spawn the next question/enemy now that this one reached the goal
+                        self.load_next_question()
 
             # handle question timer expiration (only when both timer and start are present)
             if (
@@ -564,26 +569,20 @@ class TowerDefenseGame:
                 elapsed = pygame.time.get_ticks() - self.question_timer_start
                 remaining = max(0, int(self.question_timer_ms - elapsed))
                 if remaining <= 0:
-                    # treat as wrong answer
+                    # treat as wrong answer: make enemies rush along path
                     for e in list(self.enemies):
-                        e.rush = True
-                        e.goal_pos = self.goal_pos
+                        if hasattr(e, "set_rush_to_goal"):
+                            e.set_rush_to_goal(self.goal_pos)
+                        else:
+                            e.rush = True
+                            e.goal_pos = self.goal_pos
                     if self.snd_rush and self.sfx_enabled:
                         try:
                             self.snd_rush.play()
                         except:
                             pass
-                    if self.lives is not None:
-                        self.lives -= 1
-                    if self.lives is not None and self.lives <= 0:
-                        self.state = "game_over"
-                        try:
-                            pygame.mixer.music.stop()
-                        except:
-                            pass
-                    else:
-                        # advance to next question
-                        self.load_next_question()
+                    # hide the overlay; DO NOT subtract life now; wait until arrival
+                    self.state = "playing"
 
             # drawing
             screen.fill((24, 20, 28))

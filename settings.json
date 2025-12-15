@@ -1,6 +1,6 @@
 {
   "question_order": "top",
-  "time_between_questions": 10,
+  "time_between_questions": 20,
   "total_time": 300,
   "lives": 5,
   "sfx": true,
