@@ -1,4 +1,3 @@
-# games/tower_defense/game.py
 from pathlib import Path
 import pygame
 import random
