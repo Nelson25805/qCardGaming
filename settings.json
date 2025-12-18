@@ -4,7 +4,7 @@
   "total_time": 300,
   "lives": 5,
   "sfx": true,
-  "music": true,
+  "music": false,
   "music_choice": "music_loop.wav",
   "question_mode": "one_each",
   "enemy_speed_multiplier": 0.75,

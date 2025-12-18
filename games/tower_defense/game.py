@@ -155,7 +155,7 @@ class TowerDefenseGame:
         Path is arranged so index 0 == spawn (left) and index ~half == goal (right).
         """
         cx = SCREEN_W // 2
-        cy = SCREEN_H // 2 - 20
+        cy = SCREEN_H // 2 - 135
         rx = SCREEN_W * 0.32
         ry = SCREEN_H * 0.20
         pts = []
