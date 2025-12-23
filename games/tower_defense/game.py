@@ -6,7 +6,7 @@ from .helpers import SCREEN_W, SCREEN_H
 from . import sprites, resources
 import quiz_loader, utils
 
-MAX_TOWERS = 8
+MAX_TOWERS = 8 #can be adjusted based on path length
 
 
 class TowerDefenseGame:
