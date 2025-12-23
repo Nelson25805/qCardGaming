@@ -1,4 +1,3 @@
-# games/cowboy_shooter/resources.py
 from pathlib import Path
 import pygame
 
