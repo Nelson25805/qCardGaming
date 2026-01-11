@@ -1,3 +1,4 @@
+// Settings for the quiz game application.
 {
   "question_order": "top",
   "time_between_questions": 20,
